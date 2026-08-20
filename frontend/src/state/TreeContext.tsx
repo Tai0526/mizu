@@ -9,12 +9,13 @@ import {
   type ReactNode,
 } from 'react'
 import { buildGraph, type FamilyGraph } from '../lib/graph'
+import { joinTrees } from '../lib/join'
 import { newId, nowIso } from '../lib/id'
 import { applyWrites, connect, makePerson, type Relation } from '../lib/ops'
 import { buildExampleFamily, buildNeighbourFamily } from '../lib/seed'
 import { store } from '../lib/store'
 import type { NewPersonInput } from '../lib/store/types'
-import type { Person, Tree, TreeData, Union, UnionStatus } from '../types'
+import type { MatchLink, Person, Tree, TreeData, Union, UnionStatus } from '../types'
 import { useAuth } from './AuthContext'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +45,11 @@ interface TreeValue {
   trees: Tree[]
   tree: Tree | null
   data: TreeData | null
+  /** The graph on screen: your tree, with every confirmed-match family joined
+   *  in. Ops always run against `data` — your own records. */
   graph: FamilyGraph | null
+  /** Name of the linked family a joined-in person belongs to. */
+  treeNameOf: (treeId: string) => string | undefined
   loading: boolean
   error: string | null
   /** The node in this tree that the signed-in account says is them. */
@@ -74,6 +79,8 @@ export function TreeProvider({ children }: { children: ReactNode }) {
     () => localStorage.getItem(ACTIVE_TREE_KEY),
   )
   const [data, setData] = useState<TreeData | null>(null)
+  const [neighbours, setNeighbours] = useState<TreeData[]>([])
+  const [links, setLinks] = useState<MatchLink[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const dataRef = useRef<TreeData | null>(null)
@@ -103,6 +110,18 @@ export function TreeProvider({ children }: { children: ReactNode }) {
     }
     setData(await store.loadTree(wanted.id))
     setLoading(false)
+
+    // Confirmed matches graft other families onto the chart, so their thin
+    // records and the links themselves ride along with every load.
+    try {
+      const [everything, matchLinks] = await Promise.all([store.loadAllTrees(), store.listMatches()])
+      setNeighbours(everything)
+      setLinks(matchLinks)
+    } catch {
+      // Matching data failing to load must never take the tree down with it.
+      setNeighbours([])
+      setLinks([])
+    }
   }, [account, activeId])
 
   useEffect(() => {
@@ -119,7 +138,20 @@ export function TreeProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const tree = useMemo(() => trees.find((t) => t.id === activeId) ?? null, [trees, activeId])
-  const graph = useMemo(() => (data ? buildGraph(data) : null), [data])
+
+  const graph = useMemo(() => {
+    if (!data) return null
+    const confirmed = links.filter(
+      (l) => l.status === 'confirmed' && (l.tree_a === data.tree.id || l.tree_b === data.tree.id),
+    )
+    if (!confirmed.length) return buildGraph(data)
+    return buildGraph(joinTrees(data, neighbours, confirmed))
+  }, [data, neighbours, links])
+
+  const treeNameOf = useCallback(
+    (treeId: string) => neighbours.find((t) => t.tree.id === treeId)?.tree.name,
+    [neighbours],
+  )
 
   const mePersonId = useMemo(() => {
     if (!data || !account) return null
@@ -371,6 +403,7 @@ export function TreeProvider({ children }: { children: ReactNode }) {
       tree,
       data,
       graph,
+      treeNameOf,
       loading,
       error,
       mePersonId,
@@ -388,7 +421,7 @@ export function TreeProvider({ children }: { children: ReactNode }) {
       dismissError: () => setError(null),
     }),
     [
-      trees, tree, data, graph, loading, error, mePersonId,
+      trees, tree, data, graph, treeNameOf, loading, error, mePersonId,
       selectTree, createTree, loadExampleFamily, addRelative, addFirstPerson,
       updatePerson, removePerson, updateUnion, removeUnion, setMePerson, refresh,
     ],

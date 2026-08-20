@@ -61,6 +61,7 @@ export interface NewPersonInput {
   birth_place?: string
   death_year?: number | null
   living?: boolean
+  phone?: string
   notes?: string
   photo_url?: string | null
 }

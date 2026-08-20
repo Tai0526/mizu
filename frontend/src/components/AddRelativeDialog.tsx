@@ -96,8 +96,12 @@ export function AddRelativeDialog({
   const candidates = useMemo(() => {
     if (!linking || !anchorId) return []
     const term = query.trim().toLowerCase()
+    const anchorTree = graph.person(anchorId)?.tree_id
     return graph.people
       .filter((p) => p.id !== anchorId)
+      // A joined-in relative belongs to another family's tree; linking them
+      // here would cross-write records. They stay view-only.
+      .filter((p) => p.tree_id === anchorTree)
       .filter((p) => !term || fullName(p).toLowerCase().includes(term))
       .slice(0, 40)
   }, [linking, query, graph.people, anchorId])

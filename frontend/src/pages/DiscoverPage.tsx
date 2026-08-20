@@ -67,6 +67,19 @@ export function DiscoverPage() {
     [matches, data],
   )
 
+  // The other family says one of your people is one of theirs. This is the
+  // moment the user called "the merge" — nothing joins until you say yes here.
+  const incoming = useMemo(
+    () =>
+      matches.filter(
+        (m) =>
+          m.status === 'proposed' &&
+          m.proposed_by !== account?.id &&
+          (m.tree_a === data?.tree.id || m.tree_b === data?.tree.id),
+      ),
+    [matches, account, data],
+  )
+
   const awaitingThem = useMemo(
     () =>
       matches.filter(
@@ -101,6 +114,24 @@ export function DiscoverPage() {
       .filter((row) => row.kin.category !== 'unrelated')
       .sort((a, b) => (a.kin.up ?? 9) + (a.kin.down ?? 9) - ((b.kin.up ?? 9) + (b.kin.down ?? 9)))
   }, [data, allTrees, confirmed, mePersonId])
+
+  const respond = async (link: MatchLink, agreed: boolean) => {
+    if (!account) return
+    setBusyPair(link.id)
+    try {
+      const updated: MatchLink = {
+        ...link,
+        status: agreed ? 'confirmed' : 'declined',
+        responded_by: account.id,
+      }
+      await store.saveMatch(updated)
+      setMatches((prev) => prev.map((m) => (m.id === link.id ? updated : m)))
+    } catch (err) {
+      setProblem(err instanceof Error ? err.message : 'That could not be saved.')
+    } finally {
+      setBusyPair(null)
+    }
+  }
 
   const decide = async (candidate: Candidate, agreed: boolean) => {
     if (!data || !account) return
@@ -173,6 +204,66 @@ export function DiscoverPage() {
           <p className="mt-2 text-[12.5px] text-muted">
             These come from a tree you are linked to. They stay in their owner&rsquo;s tree — copy
             anyone across by adding them to yours.
+          </p>
+        </section>
+      )}
+
+      {incoming.length > 0 && (
+        <section className="mb-8">
+          <h2 className="label mb-2.5">A family is asking you ({incoming.length})</h2>
+          <div className="space-y-3">
+            {incoming.map((link) => {
+              const mine = data?.people.find((p) => p.id === link.person_a || p.id === link.person_b)
+              const otherId = link.tree_a === data?.tree.id ? link.tree_b : link.tree_a
+              const other = allTrees.find((t) => t.tree.id === otherId)
+              return (
+                <article key={link.id} className="card overflow-hidden border-leaf/40">
+                  <div className="flex items-center gap-3 px-4 py-3.5">
+                    <Avatar person={mine} size={44} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14px] leading-snug">
+                        <strong>{other?.tree.name ?? 'Another family'}</strong> says your{' '}
+                        <strong>{fullName(mine)}</strong> is the same person as theirs.
+                      </p>
+                      <p className="mt-0.5 text-[12px] text-muted">
+                        {confidenceLabel(link.score)} · {link.score}% match
+                      </p>
+                    </div>
+                  </div>
+                  {link.reasons.length > 0 && (
+                    <ul className="space-y-1 border-t border-line px-4 py-3">
+                      {link.reasons.map((reason) => (
+                        <li key={reason} className="flex gap-2 text-[12.5px] text-muted">
+                          <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-leaf" />
+                          {reason}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="flex flex-wrap gap-2 border-t border-line px-4 py-3">
+                    <button
+                      onClick={() => void respond(link, true)}
+                      disabled={busyPair === link.id}
+                      className="btn-primary btn-sm"
+                    >
+                      {busyPair === link.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                      Accept — join our trees
+                    </button>
+                    <button
+                      onClick={() => void respond(link, false)}
+                      disabled={busyPair === link.id}
+                      className="btn-ghost btn-sm text-muted"
+                    >
+                      <X size={14} /> Different people
+                    </button>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+          <p className="mt-2 text-[12.5px] text-muted">
+            Accepting links the two trees: both families see across, including phone numbers where
+            they have been added. Your records stay yours, and either side can step back later.
           </p>
         </section>
       )}

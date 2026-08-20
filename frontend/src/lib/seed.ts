@@ -22,6 +22,7 @@ interface Draft {
   birth?: number
   death?: number
   place?: string
+  phone?: string
   notes?: string
 }
 
@@ -43,6 +44,7 @@ function builder(treeId: string, createdBy: string) {
       death_year: d.death ?? null,
       living: d.death == null,
       photo_url: null,
+      phone: d.phone ?? '',
       notes: d.notes ?? '',
       claimed_by: null,
       created_by: createdBy,
@@ -129,7 +131,7 @@ export function buildExampleFamily(tree: Tree, accountId: string): SeedResult {
   const chileshe = person({ given: 'Chileshe', family: 'Chanda', sex: 'female', birth: 1978 })
   kids(gBeatrice, mercy, bwalya, chileshe)
 
-  const aaron = person({ given: 'Aaron', family: 'Zulu', sex: 'male', birth: 1974 })
+  const aaron = person({ given: 'Aaron', family: 'Zulu', sex: 'male', birth: 1974, phone: '+260 977 111 222' })
   const linda = person({ given: 'Linda', family: 'Zulu', sex: 'female', birth: 1977 })
   kids(gGrace, aaron, linda)
 

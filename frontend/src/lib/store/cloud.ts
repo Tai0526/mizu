@@ -186,15 +186,25 @@ export function createCloudStore(): Store {
         other_names: row.other_names ?? '',
         birth_place: row.birth_place ?? '',
         photo_url: null,
+        phone: '',
         notes: '',
         claimed_by: null,
         created_by: '',
         updated_at: row.created_at,
       })
 
+      // Row security also grants full rows for trees linked to ours by a
+      // confirmed match. Overlaying them restores what discovery strips —
+      // photos, notes, and the phone number that lets found relatives call.
+      const fullRows = new Map(
+        (await selectEverything<Person>('people')).map((p) => [p.id, p]),
+      )
+
       return trees.map((tree) => ({
         tree: { ...tree, description: tree.description ?? '', created_by: tree.created_by ?? '' },
-        people: people.filter((p) => p.tree_id === tree.id).map(asPerson),
+        people: people
+          .filter((p) => p.tree_id === tree.id)
+          .map((p) => fullRows.get(p.id) ?? asPerson(p)),
         unions: unions.filter((u) => u.tree_id === tree.id),
         children: children.filter((c) => c.tree_id === tree.id),
         members: [],

@@ -1,4 +1,4 @@
-import { Check, MapPin, Pencil, Trash2, UserPlus, X } from 'lucide-react'
+import { Check, MapPin, Pencil, Phone, Trash2, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 import { fullName, lifespan, type FamilyGraph } from '../lib/graph'
 import { kinship, possessive } from '../lib/kinship'
@@ -14,6 +14,8 @@ export function PersonPanel({
   person,
   graph,
   mePersonId,
+  ownTreeId,
+  linkedTreeName,
   onClose,
   onSelect,
   onAdd,
@@ -24,6 +26,10 @@ export function PersonPanel({
   person: Person
   graph: FamilyGraph
   mePersonId: string | null
+  /** People outside this tree (visible through a confirmed match) are shown,
+   *  never edited — their own family keeps custody of the record. */
+  ownTreeId: string
+  linkedTreeName?: string
   onClose: () => void
   onSelect: (personId: string) => void
   onAdd: (personId: string) => void
@@ -38,6 +44,7 @@ export function PersonPanel({
   const [saving, setSaving] = useState(false)
 
   const isMe = person.id === mePersonId
+  const foreign = person.tree_id !== ownTreeId
   const kin = mePersonId ? kinship(graph, mePersonId, person.id) : null
 
   const parents = graph.parentsOf(person.id)
@@ -64,6 +71,7 @@ export function PersonPanel({
         birth_place: draft.birth_place?.trim() ?? '',
         death_year: draft.living ? null : (draft.death_year ?? null),
         living: draft.living,
+        phone: draft.phone?.trim() ?? '',
         notes: draft.notes?.trim() ?? '',
         photo_url: draft.photo_url ?? null,
       })
@@ -125,6 +133,21 @@ export function PersonPanel({
             )}
           </div>
 
+          {foreign && (
+            <p className="mt-3 rounded-xl border border-line bg-canvas/70 px-3.5 py-2.5 text-[12.5px] leading-snug text-muted">
+              Recorded by {linkedTreeName ?? 'a linked family'} — they look after this record.
+            </p>
+          )}
+
+          {person.phone && (
+            <a
+              href={`tel:${person.phone.replace(/[^+\d]/g, '')}`}
+              className="mt-4 flex items-center gap-2 rounded-xl border border-leaf/30 bg-leaf-soft px-3.5 py-2.5 text-[14px] font-semibold text-leaf transition hover:brightness-105"
+            >
+              <Phone size={15} /> {person.phone}
+            </a>
+          )}
+
           {person.birth_place && (
             <p className="mt-4 flex items-center gap-1.5 text-[13px] text-muted">
               <MapPin size={13} /> {person.birth_place}
@@ -148,28 +171,30 @@ export function PersonPanel({
           <Relations title="Partners" people={spouses} graph={graph} onSelect={onSelect} />
           <Relations title="Children" people={children} graph={graph} onSelect={onSelect} />
 
-          <div className="mt-6 space-y-2">
-            <button onClick={() => onAdd(person.id)} className="btn-primary w-full">
-              <UserPlus size={15} /> Add a relative of {person.given_name || 'them'}
-            </button>
-            <div className="flex gap-2">
-              <button onClick={beginEdit} className="btn-outline flex-1">
-                <Pencil size={14} /> Edit
+          {!foreign && (
+            <div className="mt-6 space-y-2">
+              <button onClick={() => onAdd(person.id)} className="btn-primary w-full">
+                <UserPlus size={15} /> Add a relative of {person.given_name || 'them'}
               </button>
-              <button
-                onClick={() => setConfirmingDelete(true)}
-                className="btn-outline px-3 text-danger hover:border-danger/50 hover:bg-danger/10"
-                aria-label={`Remove ${fullName(person)}`}
-              >
-                <Trash2 size={14} />
-              </button>
+              <div className="flex gap-2">
+                <button onClick={beginEdit} className="btn-outline flex-1">
+                  <Pencil size={14} /> Edit
+                </button>
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  className="btn-outline px-3 text-danger hover:border-danger/50 hover:bg-danger/10"
+                  aria-label={`Remove ${fullName(person)}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              {!isMe && (
+                <button onClick={() => void onClaim(person.id)} className="btn-ghost w-full text-[13px]">
+                  <Check size={14} /> This is me
+                </button>
+              )}
             </div>
-            {!isMe && (
-              <button onClick={() => void onClaim(person.id)} className="btn-ghost w-full text-[13px]">
-                <Check size={14} /> This is me
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </aside>
 

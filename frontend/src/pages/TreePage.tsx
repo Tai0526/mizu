@@ -13,7 +13,7 @@ import type { Relation } from '../lib/ops'
 
 export function TreePage() {
   const {
-    data, graph, loading, error, dismissError,
+    data, graph, treeNameOf, loading, error, dismissError,
     mePersonId, addRelative, updatePerson, removePerson, setMePerson,
   } = useTree()
 
@@ -150,7 +150,11 @@ export function TreePage() {
           mePersonId={mePersonId}
           selectedId={selectedId}
           onSelect={(id) => setSelectedId(id)}
-          onQuickAdd={(id) => openAdd(id)}
+          onQuickAdd={(id) => {
+            // People joined in from a linked family are read-only here.
+            if (graph.person(id)?.tree_id === data.tree.id) openAdd(id)
+            else setSelectedId(id)
+          }}
           onGhostClick={(unionId) => {
             const firstChild = graph.childrenOfUnion(unionId)[0]
             if (firstChild) openAdd(firstChild.id, 'parent')
@@ -279,6 +283,8 @@ export function TreePage() {
             person={selected}
             graph={graph}
             mePersonId={mePersonId}
+            ownTreeId={data.tree.id}
+            linkedTreeName={treeNameOf(selected.tree_id)}
             onClose={() => setSelectedId(null)}
             onSelect={goTo}
             onAdd={(id) => openAdd(id)}

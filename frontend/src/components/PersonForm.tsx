@@ -19,6 +19,7 @@ export const emptyDraft = (family = ''): PersonDraft => ({
   birth_place: '',
   death_year: null,
   living: true,
+  phone: '',
   notes: '',
   photo_url: null,
 })
@@ -32,6 +33,7 @@ export const draftFromPerson = (p: Person): PersonDraft => ({
   birth_place: p.birth_place,
   death_year: p.death_year,
   living: p.living,
+  phone: p.phone,
   notes: p.notes,
   photo_url: p.photo_url,
 })
@@ -165,6 +167,19 @@ export function PersonForm({
               value={draft.other_names ?? ''}
               onChange={(e) => set('other_names', e.target.value)}
               placeholder="née Chanda"
+            />
+          </Field>
+          <Field
+            label="Phone number"
+            hint="Shown to this tree's family, and to relatives once a match is confirmed — that is how you keep in touch."
+          >
+            <input
+              className="field"
+              type="tel"
+              inputMode="tel"
+              value={draft.phone ?? ''}
+              onChange={(e) => set('phone', e.target.value)}
+              placeholder="+260 977 000000"
             />
           </Field>
           <Field label="Born in">

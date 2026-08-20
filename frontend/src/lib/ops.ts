@@ -44,6 +44,7 @@ export function makePerson(treeId: string, input: NewPersonInput, createdBy: str
     death_year: input.death_year ?? null,
     living: input.living ?? input.death_year == null,
     photo_url: input.photo_url ?? null,
+    phone: input.phone?.trim() ?? '',
     notes: input.notes?.trim() ?? '',
     claimed_by: null,
     created_by: createdBy,

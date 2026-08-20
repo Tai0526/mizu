@@ -34,6 +34,9 @@ export interface Person {
   living: boolean
   /** Data URL in local mode, Supabase Storage URL once a backend is connected. */
   photo_url: string | null
+  /** Only ever shown to this tree's members and to families linked by a
+   *  confirmed match — never to matching itself. */
+  phone: string
   notes: string
   /** Set when a real account says "this person is me". */
   claimed_by: string | null

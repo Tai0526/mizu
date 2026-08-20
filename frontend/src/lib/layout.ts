@@ -1,28 +1,34 @@
 import type { Union } from '../types'
-import type { FamilyGraph } from './graph'
+import { ancestorDepths, type FamilyGraph } from './graph'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Turning the family graph into a drawn chart.
+// Turning the family graph into a drawn tree.
 //
-// This is a tidy-tree layout adapted for the thing that makes family charts
-// awkward: the unit that has children is a *couple*, not a person. So each block
-// is a row of cards (someone plus whoever they married) with the descendants of
-// each of those marriages laid out underneath, and the row centred over them.
+// Two layouts share the machinery here:
 //
-// Widths are computed bottom-up. A block reports how wide it is; its parent
-// packs the children side by side, then centres the parents' row over the whole
-// span. Because every block puts its own row at `depth * ROW_H`, generations
-// line up across the entire chart without a second pass.
+//  · layoutTree — a plain top-down chart from one ancestral root. Used when
+//    nobody has said which person is "me".
+//
+//  · layoutFamily — the main view. You and your parents stand in the middle;
+//    your mother's people spread to the left, your father's to the right. Each
+//    wing runs from the grandparents' generation (and their brothers and
+//    sisters) down through your aunts and uncles to your cousins, and a long
+//    branch swings from each wing in to the parent it belongs to.
+//
+// Connectors are stored as endpoints, not path strings, and rendered as curves
+// — which is what makes the chart read as a living tree rather than a wiring
+// diagram. The unit that has children is a couple, so each block is a row of
+// cards with the descendants of each marriage fanned out beneath it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const CARD_W = 176
 export const CARD_H = 100
 const SPOUSE_GAP = 28 // gap between partner cards, spanned by the marriage bar
-const SIB_GAP = 30 // gap between sibling subtrees
+const SIB_GAP = 34 // gap between sibling subtrees
 const GROUP_GAP = 56 // extra gap between the children of two different marriages
-const ROW_GAP = 104 // vertical breathing room between generations
+const ROW_GAP = 112 // vertical breathing room between generations
 export const ROW_H = CARD_H + ROW_GAP
-const SIB_BAR_DROP = 46 // how far above a generation the sibling bar sits
+const WING_GAP = 120 // clearance between a wing and the centre column
 
 export interface LaidCard {
   key: string
@@ -40,8 +46,15 @@ export interface LaidCard {
 
 export interface LaidEdge {
   key: string
-  d: string
-  kind: 'marriage' | 'descent'
+  kind: 'marriage' | 'branch'
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  /** Marriage routed under the row (a third partner) dips to this y. */
+  dip?: number
+  /** Row the branch lands on — older branches are drawn thicker. */
+  row: number
 }
 
 export interface Layout {
@@ -52,32 +65,38 @@ export interface Layout {
   generations: number
   /** Where each person ended up, for centring the viewport on someone. */
   index: Map<string, LaidCard>
+  /** Where each union's children hang from — used to graft wings on. */
+  anchors: Map<string, { x: number; y: number }>
 }
 
 interface Block {
   width: number
-  /** Centre of the block's primary card, relative to the block's left edge. */
   centerX: number
   cards: LaidCard[]
   edges: LaidEdge[]
+  anchors: Map<string, { x: number; y: number }>
   maxGeneration: number
 }
 
-const shift = (block: Block, dx: number): Block => ({
+const shiftX = (block: Block, dx: number): Block => ({
   ...block,
   centerX: block.centerX + dx,
   cards: block.cards.map((c) => ({ ...c, x: c.x + dx })),
-  edges: block.edges.map((e) => ({ ...e, d: shiftPath(e.d, dx) })),
+  edges: block.edges.map((e) => ({ ...e, x1: e.x1 + dx, x2: e.x2 + dx })),
+  anchors: new Map([...block.anchors].map(([k, a]) => [k, { x: a.x + dx, y: a.y }])),
 })
 
-/** Paths are emitted with absolute commands only, so shifting is a plain
- *  translate of every x coordinate. Cheaper than re-walking the recursion. */
-function shiftPath(d: string, dx: number): string {
-  return d.replace(/([MLHV]) ?(-?[\d.]+)(?: (-?[\d.]+))?/g, (_m, cmd, a, b) => {
-    if (cmd === 'V') return `V ${a}`
-    if (cmd === 'H') return `H ${Number(a) + dx}`
-    return `${cmd} ${Number(a) + dx} ${b}`
-  })
+interface LayoutOpts {
+  /** People left out of the chart entirely (drawn elsewhere, e.g. the centre). */
+  skip?: Set<string>
+  /** Preferred card order for a union root's partner row. */
+  partnerOrder?: string[]
+}
+
+interface Ctx {
+  g: FamilyGraph
+  visited: Set<string>
+  skip: Set<string>
 }
 
 interface RowMember {
@@ -88,9 +107,10 @@ interface RowMember {
 
 /**
  * Packs one generation's row and the children hanging beneath it.
- * Shared by the person recursion and the root-union entry point.
+ * Shared by the person recursion and the union-root entry point.
  */
 function assemble(
+  ctx: Ctx,
   members: RowMember[],
   groups: { union: Union; blocks: Block[] }[],
   generation: number,
@@ -98,6 +118,7 @@ function assemble(
   keyPrefix: string,
   ghostUnion?: Union,
 ): Block {
+  void ctx
   const cardCount = Math.max(members.length, ghostUnion ? 1 : 0)
   const rowWidth = cardCount * CARD_W + Math.max(0, cardCount - 1) * SPOUSE_GAP
 
@@ -114,6 +135,7 @@ function assemble(
 
   const cards: LaidCard[] = []
   const edges: LaidEdge[] = []
+  const anchors = new Map<string, { x: number; y: number }>()
 
   // ── The row itself ─────────────────────────────────────────────────────────
   const cardX = (i: number) => rowX + i * (CARD_W + SPOUSE_GAP)
@@ -146,40 +168,43 @@ function assemble(
 
   // ── Marriage bars ──────────────────────────────────────────────────────────
   const barY = rowY + CARD_H / 2
-  const unionBar = new Map<string, { x: number; y: number }>()
 
   members.forEach((m, i) => {
     if (!m.unionId) return
     const from = Math.min(anchorIndex, i)
     const to = Math.max(anchorIndex, i)
-    const adjacent = to - from === 1
 
-    if (adjacent) {
+    if (to - from === 1) {
       const x1 = cardX(from) + CARD_W
       const x2 = cardX(to)
-      edges.push({ key: `m:${m.unionId}`, kind: 'marriage', d: `M ${x1} ${barY} H ${x2}` })
-      unionBar.set(m.unionId, { x: (x1 + x2) / 2, y: barY })
+      edges.push({ key: `m:${m.unionId}`, kind: 'marriage', x1, y1: barY, x2, y2: barY, row: generation })
+      anchors.set(m.unionId, { x: (x1 + x2) / 2, y: barY })
     } else {
       // A third or later marriage would have its bar cross the cards in
-      // between, so it is routed just under the row instead.
-      const dip = rowY + CARD_H + 16
+      // between, so it swings underneath the row instead.
+      const dip = rowY + CARD_H + 22
       const x1 = cardCenter(anchorIndex)
       const x2 = cardCenter(i)
       edges.push({
         key: `m:${m.unionId}`,
         kind: 'marriage',
-        d: `M ${x1} ${rowY + CARD_H} V ${dip} H ${x2} V ${rowY + CARD_H}`,
+        x1,
+        y1: rowY + CARD_H,
+        x2,
+        y2: rowY + CARD_H,
+        dip,
+        row: generation,
       })
-      unionBar.set(m.unionId, { x: (x1 + x2) / 2, y: dip })
+      anchors.set(m.unionId, { x: (x1 + x2) / 2, y: dip })
     }
   })
 
-  // ── Children ───────────────────────────────────────────────────────────────
+  // ── Children: one branch per child, fanning out from the couple ────────────
   let cursor = (width - childrenWidth) / 2
   groups.forEach((grp) => {
     const placed: Block[] = []
     for (const block of grp.blocks) {
-      placed.push(shift(block, cursor))
+      placed.push(shiftX(block, cursor))
       cursor += block.width + SIB_GAP
     }
     cursor += GROUP_GAP - SIB_GAP
@@ -187,42 +212,40 @@ function assemble(
     for (const block of placed) {
       cards.push(...block.cards)
       edges.push(...block.edges)
+      block.anchors.forEach((a, k) => anchors.set(k, a))
     }
 
-    // Where this marriage drops from: the bar if there are two partners, the
-    // bottom of the single card if only one parent is known.
-    const anchor = unionBar.get(grp.union.id) ?? {
+    // Where this marriage's branches grow from: the bar if there are two
+    // partners, the bottom of the single card if only one parent is known.
+    const anchor = anchors.get(grp.union.id) ?? {
       x: ghostUnion ? cardCenter(0) : cardCenter(anchorIndex),
       y: rowY + CARD_H,
     }
+    anchors.set(grp.union.id, anchor)
 
-    const childCenters = placed.map((b) => b.centerX)
     const childTop = (generation + 1) * ROW_H
-    const sibY = childTop - SIB_BAR_DROP
-
-    if (childCenters.length === 1 && Math.abs(childCenters[0] - anchor.x) < 0.5) {
+    placed.forEach((block, i) => {
       edges.push({
-        key: `d:${grp.union.id}:straight`,
-        kind: 'descent',
-        d: `M ${anchor.x} ${anchor.y} V ${childTop}`,
+        key: `b:${grp.union.id}:${grp.blocks[i]?.cards[0]?.key ?? i}`,
+        kind: 'branch',
+        x1: anchor.x,
+        y1: anchor.y,
+        x2: block.centerX,
+        y2: childTop,
+        row: generation + 1,
       })
-    } else {
-      const left = Math.min(...childCenters, anchor.x)
-      const right = Math.max(...childCenters, anchor.x)
-      edges.push({
-        key: `d:${grp.union.id}:stem`,
-        kind: 'descent',
-        d: `M ${anchor.x} ${anchor.y} V ${sibY} M ${left} ${sibY} H ${right}`,
-      })
-      placed.forEach((block, i) => {
-        edges.push({
-          key: `d:${grp.union.id}:${grp.blocks[i]?.cards[0]?.personId ?? i}`,
-          kind: 'descent',
-          d: `M ${block.centerX} ${sibY} V ${childTop}`,
-        })
-      })
-    }
+    })
   })
+
+  // A union with no children drawn here still needs a recorded anchor, so a
+  // wing can graft onto it later.
+  if (!ghostUnion) {
+    members.forEach((m) => {
+      if (m.unionId && !anchors.has(m.unionId)) {
+        anchors.set(m.unionId, { x: cardCenter(anchorIndex), y: rowY + CARD_H })
+      }
+    })
+  }
 
   const maxGeneration = groups.reduce(
     (max, grp) => Math.max(max, ...grp.blocks.map((b) => b.maxGeneration)),
@@ -234,16 +257,13 @@ function assemble(
     centerX: ghostUnion ? cardCenter(0) : cardCenter(anchorIndex),
     cards,
     edges,
+    anchors,
     maxGeneration,
   }
 }
 
-function layoutPerson(
-  g: FamilyGraph,
-  personId: string,
-  generation: number,
-  visited: Set<string>,
-): Block {
+function layoutPerson(ctx: Ctx, personId: string, generation: number): Block {
+  const { g, visited, skip } = ctx
   const alreadyDrawn = visited.has(personId)
   visited.add(personId)
 
@@ -265,6 +285,7 @@ function layoutPerson(
         },
       ],
       edges: [],
+      anchors: new Map(),
       maxGeneration: generation,
     }
   }
@@ -276,7 +297,7 @@ function layoutPerson(
   const spouseEntries: RowMember[] = []
   for (const u of unions) {
     const spouseId = u.partner_a === personId ? u.partner_b : u.partner_a
-    if (spouseId) spouseEntries.push({ personId: spouseId, unionId: u.id })
+    if (spouseId && !skip.has(spouseId)) spouseEntries.push({ personId: spouseId, unionId: u.id })
   }
 
   let members: RowMember[]
@@ -288,17 +309,19 @@ function layoutPerson(
     members = [spouseEntries[0], { personId }, ...spouseEntries.slice(1)]
     anchorIndex = 1
   }
+  members.forEach((m) => visited.add(m.personId))
 
   const groups = unions
     .map((union) => ({
       union,
       blocks: g
         .childrenOfUnion(union.id)
-        .map((child) => layoutPerson(g, child.id, generation + 1, visited)),
+        .filter((child) => !skip.has(child.id))
+        .map((child) => layoutPerson(ctx, child.id, generation + 1)),
     }))
     .filter((grp) => grp.blocks.length > 0)
 
-  return assemble(members, groups, generation, anchorIndex, `p:${personId}`)
+  return assemble(ctx, members, groups, generation, anchorIndex, `p:${personId}`)
 }
 
 export interface RootRef {
@@ -306,7 +329,7 @@ export interface RootRef {
   id: string
 }
 
-/** Where the chart should start: the highest union or person above `focusId`. */
+/** Where a plain chart should start: the highest union or person above `focusId`. */
 export function findRoot(g: FamilyGraph, focusId: string): RootRef | null {
   if (!g.person(focusId)) return null
   let current = focusId
@@ -340,15 +363,25 @@ function heightAbove(g: FamilyGraph, id: string, depth = 0, path: string[] = [])
   return Math.max(...parents.map((p) => heightAbove(g, p.id, depth + 1, [...path, id])))
 }
 
-export function layoutTree(g: FamilyGraph, root: RootRef): Layout {
-  const visited = new Set<string>()
+export function layoutTree(g: FamilyGraph, root: RootRef, opts: LayoutOpts = {}): Layout {
+  const ctx: Ctx = { g, visited: new Set(opts.skip), skip: opts.skip ?? new Set() }
   let block: Block
 
   if (root.kind === 'union') {
     const union = g.union(root.id)
     if (!union) return emptyLayout()
-    const partners = [union.partner_a, union.partner_b].filter((x): x is string => !!x)
-    partners.forEach((p) => visited.add(p))
+    let partners = [union.partner_a, union.partner_b].filter(
+      (x): x is string => !!x && !ctx.skip.has(x),
+    )
+    if (opts.partnerOrder) {
+      const order = opts.partnerOrder
+      const rank = (id: string) => {
+        const at = order.indexOf(id)
+        return at < 0 ? 99 : at
+      }
+      partners = [...partners].sort((a, b) => rank(a) - rank(b))
+    }
+    partners.forEach((p) => ctx.visited.add(p))
 
     const members: RowMember[] = partners.map((personId, i) =>
       i === 0 ? { personId } : { personId, unionId: union.id },
@@ -356,11 +389,15 @@ export function layoutTree(g: FamilyGraph, root: RootRef): Layout {
     const groups = [
       {
         union,
-        blocks: g.childrenOfUnion(union.id).map((c) => layoutPerson(g, c.id, 1, visited)),
+        blocks: g
+          .childrenOfUnion(union.id)
+          .filter((c) => !ctx.skip.has(c.id))
+          .map((c) => layoutPerson(ctx, c.id, 1)),
       },
     ].filter((grp) => grp.blocks.length > 0)
 
     block = assemble(
+      ctx,
       members,
       groups,
       0,
@@ -369,14 +406,175 @@ export function layoutTree(g: FamilyGraph, root: RootRef): Layout {
       partners.length === 0 ? union : undefined,
     )
   } else {
-    block = layoutPerson(g, root.id, 0, visited)
+    block = layoutPerson(ctx, root.id, 0)
   }
+
+  return finish(block)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The main view: you in the middle, your mother's people to the left, your
+// father's to the right, each wing grafted onto its parent by a long branch.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function layoutFamily(g: FamilyGraph, meId: string): Layout {
+  const parentUnion = g.parentUnionOf(meId)
+  const parents = g.parentsOf(meId)
+
+  // Nothing recorded above you yet: the plain chart is the honest picture.
+  if (!parentUnion || parents.length === 0) {
+    const root = findRoot(g, meId) ?? { kind: 'person' as const, id: meId }
+    return layoutTree(g, root)
+  }
+
+  // Mother to the left, father to the right; unknown sexes keep record order.
+  const mother = parents.find((p) => p.sex === 'female')
+  const father = parents.find((p) => p.id !== mother?.id && p.sex === 'male')
+  const left = mother ?? parents[0]
+  const right = father ?? parents.find((p) => p.id !== left.id) ?? null
+
+  const parentIds = parents.map((p) => p.id)
+
+  // ── Centre: the parents' marriage, you and your siblings, and below ────────
+  const centre = layoutTree(g, { kind: 'union', id: parentUnion.id }, {
+    partnerOrder: [left.id, ...(right ? [right.id] : [])],
+  })
+
+  // ── Wings: each parent's family, minus the parent (they stand in the centre)
+  const wing = (parentId: string): { layout: Layout; parentRow: number } | null => {
+    const birthUnion = g.parentUnionOf(parentId)
+    if (!birthUnion) return null // nothing recorded on this side yet
+
+    const root = findRoot(g, parentId)
+    if (!root) return null
+
+    const laid = layoutTree(g, root, {
+      // The parent stands in the centre; the other parent belongs to the other
+      // wing; you and yours belong to the centre.
+      skip: new Set([...parentIds, meId]),
+    })
+    if (!laid.cards.length) return null
+
+    // The row the missing parent would occupy in this wing — the reference
+    // that lines the generations up across all three blocks.
+    const depths = ancestorDepths(g, parentId)
+    let parentRow: number | null = null
+    if (root.kind === 'person') {
+      const d = depths.get(root.id)
+      if (d !== undefined) parentRow = d
+    } else {
+      for (const child of g.childrenOfUnion(root.id)) {
+        if (child.id === parentId) {
+          parentRow = 1
+          break
+        }
+        const d = depths.get(child.id)
+        if (d !== undefined) {
+          parentRow = d + 1
+          break
+        }
+      }
+    }
+    if (parentRow === null) return null
+    return { layout: laid, parentRow }
+  }
+
+  const leftWing = wing(left.id)
+  const rightWing = right ? wing(right.id) : null
+
+  // Without at least one wing there is nothing to centre between.
+  if (!leftWing && !rightWing) return centre
+
+  // ── Vertical alignment: the parents' row is the shared reference ───────────
+  const parentsRow = Math.max(leftWing?.parentRow ?? 0, rightWing?.parentRow ?? 0)
+
+  const place = (laid: Layout, rowShift: number, xShift: number): Layout => ({
+    ...laid,
+    cards: laid.cards.map((c) => ({
+      ...c,
+      x: c.x + xShift,
+      y: c.y + rowShift * ROW_H,
+      generation: c.generation + rowShift,
+    })),
+    edges: laid.edges.map((e) => ({
+      ...e,
+      x1: e.x1 + xShift,
+      x2: e.x2 + xShift,
+      y1: e.y1 + rowShift * ROW_H,
+      y2: e.y2 + rowShift * ROW_H,
+      dip: e.dip === undefined ? undefined : e.dip + rowShift * ROW_H,
+      row: e.row + rowShift,
+    })),
+    anchors: new Map(
+      [...laid.anchors].map(([k, a]) => [k, { x: a.x + xShift, y: a.y + rowShift * ROW_H }]),
+    ),
+  })
+
+  let x = 0
+  const blocks: Layout[] = []
+
+  const placedLeft = leftWing ? place(leftWing.layout, parentsRow - leftWing.parentRow, x) : null
+  if (placedLeft) {
+    blocks.push(placedLeft)
+    x += leftWing!.layout.width + WING_GAP
+  }
+
+  const placedCentre = place(centre, parentsRow, x)
+  blocks.push(placedCentre)
+  x += centre.width
+
+  const placedRight = rightWing
+    ? place(rightWing.layout, parentsRow - rightWing.parentRow, x + WING_GAP)
+    : null
+  if (placedRight) {
+    blocks.push(placedRight)
+    x += WING_GAP + rightWing!.layout.width
+  }
+
+  // ── Merge, then graft each wing onto its parent's card ─────────────────────
+  const cards = blocks.flatMap((b) => b.cards)
+  const edges = blocks.flatMap((b) => b.edges)
+  const anchors = new Map<string, { x: number; y: number }>()
+  blocks.forEach((b) => b.anchors.forEach((a, k) => anchors.set(k, a)))
 
   const index = new Map<string, LaidCard>()
-  for (const card of block.cards) {
-    if (card.personId && !card.duplicate) index.set(card.personId, card)
+  for (const card of cards) {
+    if (card.personId && !card.duplicate && !index.has(card.personId)) {
+      index.set(card.personId, card)
+    }
   }
 
+  const graft = (placedWing: Layout | null, parentId: string) => {
+    if (!placedWing) return
+    const birthUnion = g.parentUnionOf(parentId)
+    const target = index.get(parentId)
+    if (!birthUnion || !target) return
+    const from = placedWing.anchors.get(birthUnion.id)
+    if (!from) return
+    edges.push({
+      key: `graft:${parentId}`,
+      kind: 'branch',
+      x1: from.x,
+      y1: from.y,
+      x2: target.x + CARD_W / 2,
+      y2: target.y,
+      row: parentsRow,
+    })
+  }
+  graft(placedLeft, left.id)
+  if (right) graft(placedRight, right.id)
+
+  const height = Math.max(...cards.map((c) => c.y + CARD_H))
+  const generations = Math.max(...cards.map((c) => c.generation)) + 1
+
+  return { cards, edges, width: x, height, generations, index, anchors }
+}
+
+function finish(block: Block): Layout {
+  const index = new Map<string, LaidCard>()
+  for (const card of block.cards) {
+    if (card.personId && !card.duplicate && !index.has(card.personId)) index.set(card.personId, card)
+  }
   return {
     cards: block.cards,
     edges: block.edges,
@@ -384,6 +582,7 @@ export function layoutTree(g: FamilyGraph, root: RootRef): Layout {
     height: (block.maxGeneration + 1) * ROW_H - (ROW_H - CARD_H),
     generations: block.maxGeneration + 1,
     index,
+    anchors: block.anchors,
   }
 }
 
@@ -394,4 +593,31 @@ const emptyLayout = (): Layout => ({
   height: 0,
   generations: 0,
   index: new Map(),
+  anchors: new Map(),
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rendering the connectors as branches.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The path for one edge. Branches are S-curves — the difference between a
+ *  wiring diagram and something that reads as a bare-branched tree. */
+export function edgePath(e: LaidEdge): string {
+  if (e.kind === 'marriage') {
+    if (e.dip !== undefined) {
+      // Routed under the row: a shallow swoop beneath the cards in between.
+      return `M ${e.x1} ${e.y1} C ${e.x1} ${e.dip + 26}, ${e.x2} ${e.dip + 26}, ${e.x2} ${e.y2}`
+    }
+    return `M ${e.x1} ${e.y1} L ${e.x2} ${e.y2}`
+  }
+  const midY = e.y1 + (e.y2 - e.y1) * 0.55
+  return `M ${e.x1} ${e.y1} C ${e.x1} ${midY}, ${e.x2} ${e.y1 + (e.y2 - e.y1) * 0.45}, ${e.x2} ${e.y2}`
+}
+
+/** Branch thickness by generation: boughs near the top of the family are
+ *  thick, twigs at the youngest generation are thin. */
+export function branchWidth(e: LaidEdge, totalRows: number): number {
+  if (e.kind === 'marriage') return 2.25
+  const t = totalRows <= 1 ? 1 : Math.min(1, Math.max(0, e.row / (totalRows - 1)))
+  return 5.5 - 3.6 * t
+}

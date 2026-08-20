@@ -1,22 +1,29 @@
 import type { Person, Sex } from '../types'
-import { fullName, type FamilyGraph } from './graph'
+import { ancestorDepths, fullName, type FamilyGraph } from './graph'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // "How am I related to this person?"
 //
-// This is the whole point of Mizu. A name in a box is trivia; "your grandmother's
-// brother's granddaughter — your second cousin" is the thing people actually
-// came for. Nothing here is stored: a relationship only exists relative to who
-// is looking, so it is computed fresh for every viewer.
+// This is the whole point of Mizu, and it answers the question the way a family
+// answers it, not the way a genealogist does.
 //
-// The method is the standard one: find the nearest ancestor the two people
-// share, measure how many generations each stands below that ancestor, and read
-// the label off those two numbers.
+// Genealogically, your mother's cousin is your "first cousin once removed".
+// Nobody says that. He is your uncle, his children are your cousins, and your
+// grandmother's sister is your grandmother. What decides the word is which
+// GENERATION someone stands in relative to you — not how many branches across
+// they sit. That is how most of the world names family, and it is the naming
+// this app leads with.
 //
-//   up(viewer)=1, up(target)=1  → siblings
-//   up(viewer)=2, up(target)=1  → target is your aunt or uncle
-//   up(viewer)=1, up(target)=2  → target is your niece or nephew
-//   up(viewer)=n, up(target)=m  → cousins, degree min(n,m)-1, removed |n-m|
+// The precise term is still computed and kept in `exact`, because knowing
+// somebody is a second cousin rather than a first is worth having. It is shown
+// as a footnote, never as the headline.
+//
+// Both readings come from the same two numbers: find the nearest ancestor two
+// people share, and count the generations each stands below it.
+//
+//   up = how far I am below the shared ancestor
+//   down = how far they are
+//   offset = up - down  →  positive means they are of an older generation
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type KinCategory =
@@ -25,23 +32,24 @@ export type KinCategory =
   | 'ancestor'
   | 'descendant'
   | 'sibling'
-  | 'pibling' // aunt / uncle
-  | 'nibling' // niece / nephew
+  | 'pibling' // aunt / uncle, in the wide family sense
+  | 'nibling' // niece / nephew, likewise
   | 'cousin'
   | 'in-law'
   | 'step'
   | 'unrelated'
 
 export interface Kinship {
-  /** "your first cousin once removed" — ready to drop into a sentence. */
+  /** The family word: "uncle". Ready to drop into a sentence. */
   label: string
-  /** "1st cousin" — short enough for a card on the canvas. */
+  /** The same word, sized for a card. */
   short: string
+  /** The genealogist's term, when it differs — "first cousin once removed". */
+  exact: string | null
   category: KinCategory
   /** Plain-English reason, shown in the person panel. */
   explanation: string | null
   commonAncestorId: string | null
-  /** Generations each person stands below the shared ancestor. */
   up: number | null
   down: number | null
   degree?: number
@@ -51,6 +59,7 @@ export interface Kinship {
 const UNRELATED: Kinship = {
   label: 'not yet connected',
   short: '—',
+  exact: null,
   category: 'unrelated',
   explanation: null,
   commonAncestorId: null,
@@ -75,25 +84,19 @@ const ORDINALS = [
   'seventh', 'eighth', 'ninth', 'tenth',
 ]
 const ordinal = (n: number) => ORDINALS[n - 1] ?? `${n}th`
-const ordinalShort = (n: number) => {
-  const suffix = n % 10 === 1 && n % 100 !== 11 ? 'st'
-    : n % 10 === 2 && n % 100 !== 12 ? 'nd'
-    : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'
-  return `${n}${suffix}`
-}
 
 const TIMES = ['', 'once', 'twice', 'three times', 'four times', 'five times']
 const removedPhrase = (n: number) => (n === 0 ? '' : ` ${TIMES[n] ?? `${n} times`} removed`)
-// A card is wide enough for "2nd cousin twice removed", and that phrase is the
-// one people actually want to read. No abbreviation earns its confusion here.
-const removedShort = removedPhrase
+
+/** Sentence case, for a label standing alone on a chip. */
+export const sentenceCase = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s)
 
 // ── Ancestry index, including unions ─────────────────────────────────────────
 //
 // Ancestors are walked through *unions*, not just through named parents. That
-// matters constantly in practice: you can know that your grandmother had five
+// matters constantly in practice: you can know your grandmother had five
 // siblings long before you know either of her parents' names. Recording them as
-// children of one (nameless) union still makes them siblings, and every cousin
+// children of one nameless union still makes them siblings, and every cousin
 // relation below them still resolves. A union sits at the same generation as
 // the partners in it, so the depth maths is unaffected.
 
@@ -108,29 +111,21 @@ function ancestryIndex(g: FamilyGraph, id: string, cap = 25): Map<string, number
     depth++
     const next: string[] = []
     for (const cur of frontier) {
-      const personId = cur.startsWith('u:') ? null : cur
+      const parentUnion = g.parentUnionOf(cur)
+      if (!parentUnion) continue
 
-      if (personId) {
-        const parentUnion = g.parentUnionOf(personId)
-        if (parentUnion) {
-          const key = unionKey(parentUnion.id)
-          if (!depths.has(key)) {
-            depths.set(key, depth)
-            next.push(key)
-          }
-          for (const parent of g.parentsOf(personId)) {
-            if (depths.has(parent.id)) continue
-            depths.set(parent.id, depth)
-            // A parent is reached at this depth; their own ancestors come from
-            // the next round, so they must be walked from here.
-            next.push(parent.id)
-          }
-        }
+      const key = unionKey(parentUnion.id)
+      if (!depths.has(key)) depths.set(key, depth)
+
+      for (const parent of g.parentsOf(cur)) {
+        // Keep the shortest path. Where cousins have married, the same ancestor
+        // is reachable two ways and the nearer one gives the true label.
+        if (depths.has(parent.id)) continue
+        depths.set(parent.id, depth)
+        next.push(parent.id)
       }
     }
-    // Union keys carry no further ancestry of their own — the partners inside
-    // them do — so they are recorded but not re-expanded.
-    frontier = next.filter((k) => !k.startsWith('u:'))
+    frontier = next
   }
   return depths
 }
@@ -154,7 +149,6 @@ function nearestCommon(a: Map<string, number>, b: Map<string, number>): Meeting 
     const sum = up + down
     const bestSum = best.up + best.down
     if (sum !== bestSum) { if (sum < bestSum) best = candidate; continue }
-    // Same distance: prefer the more balanced pair, then a real person.
     const skew = Math.abs(up - down)
     const bestSkew = Math.abs(best.up - best.down)
     if (skew !== bestSkew) { if (skew < bestSkew) best = candidate; continue }
@@ -163,64 +157,83 @@ function nearestCommon(a: Map<string, number>, b: Map<string, number>): Meeting 
   return best
 }
 
-// ── Blood relationships ──────────────────────────────────────────────────────
+// ── The family word ──────────────────────────────────────────────────────────
+//
+// Generation decides the word. Anyone standing one generation above you, by any
+// route, is an uncle or an aunt. Two above, a grandparent. Your own generation
+// is brothers, sisters and cousins. Below you, nieces and nephews.
 
-function bloodLabel(
-  target: Person,
-  up: number,
-  down: number,
-): { label: string; short: string; category: KinCategory; degree?: number; removed?: number } {
-  const sex = target.sex
-
-  // The shared ancestor is the target themselves — they are your ancestor.
+function familyTerm(sex: Sex, up: number, down: number): { word: string; category: KinCategory } {
+  // Straight up your own line.
   if (down === 0) {
-    if (up === 1) {
-      return { label: bySex(sex, 'father', 'mother', 'parent'), short: bySex(sex, 'father', 'mother', 'parent'), category: 'ancestor' }
+    if (up === 1) return { word: bySex(sex, 'father', 'mother', 'parent'), category: 'ancestor' }
+    return {
+      word: greats(up - 2, bySex(sex, 'grandfather', 'grandmother', 'grandparent')),
+      category: 'ancestor',
     }
-    const base = bySex(sex, 'grandfather', 'grandmother', 'grandparent')
-    const word = greats(up - 2, base)
-    return { label: word, short: word, category: 'ancestor' }
   }
 
-  // The shared ancestor is you — they descend from you.
+  // Straight down from you.
   if (up === 0) {
-    if (down === 1) {
-      return { label: bySex(sex, 'son', 'daughter', 'child'), short: bySex(sex, 'son', 'daughter', 'child'), category: 'descendant' }
+    if (down === 1) return { word: bySex(sex, 'son', 'daughter', 'child'), category: 'descendant' }
+    return {
+      word: greats(down - 2, bySex(sex, 'grandson', 'granddaughter', 'grandchild')),
+      category: 'descendant',
     }
-    const base = bySex(sex, 'grandson', 'granddaughter', 'grandchild')
-    const word = greats(down - 2, base)
-    return { label: word, short: word, category: 'descendant' }
   }
 
-  if (up === 1 && down === 1) {
-    // Half siblings are labelled by the caller, which knows who is looking.
-    const word = bySex(sex, 'brother', 'sister', 'sibling')
-    return { label: word, short: word, category: 'sibling' }
+  const offset = up - down
+
+  if (offset === 0) {
+    if (up === 1) return { word: bySex(sex, 'brother', 'sister', 'sibling'), category: 'sibling' }
+    // Second cousins, third cousins — all just cousins, which is what a family
+    // calls them and how they are treated.
+    return { word: 'cousin', category: 'cousin' }
   }
 
-  // They are a sibling of one of your ancestors: aunt / uncle, then great-.
+  if (offset === 1) {
+    // Parent's sibling, parent's cousin, parent's second cousin — all uncle.
+    return { word: bySex(sex, 'uncle', 'aunt', 'aunt or uncle'), category: 'pibling' }
+  }
+
+  if (offset >= 2) {
+    // Grandmother's sister is a grandmother. The generation carries the word.
+    return {
+      word: greats(offset - 2, bySex(sex, 'grandfather', 'grandmother', 'grandparent')),
+      category: 'pibling',
+    }
+  }
+
+  if (offset === -1) {
+    return { word: bySex(sex, 'nephew', 'niece', 'niece or nephew'), category: 'nibling' }
+  }
+
+  return {
+    word: greats(-offset - 2, bySex(sex, 'grandson', 'granddaughter', 'grandchild')),
+    category: 'nibling',
+  }
+}
+
+// ── The genealogist's term ───────────────────────────────────────────────────
+//
+// Kept so nothing is lost. Shown as a footnote where it differs from the word
+// the family would use.
+
+function exactTerm(sex: Sex, up: number, down: number): { word: string; degree?: number; removed?: number } {
+  if (down === 0 || up === 0) return { word: familyTerm(sex, up, down).word }
+
+  if (up === 1 && down === 1) return { word: bySex(sex, 'brother', 'sister', 'sibling') }
+
   if (down === 1) {
-    const base = bySex(sex, 'uncle', 'aunt', 'aunt or uncle')
-    const word = greats(up - 2, base)
-    return { label: word, short: word, category: 'pibling' }
+    return { word: greats(up - 2, bySex(sex, 'uncle', 'aunt', 'aunt or uncle')) }
   }
-
-  // You are a sibling of one of their ancestors: niece / nephew.
   if (up === 1) {
-    const base = bySex(sex, 'nephew', 'niece', 'niece or nephew')
-    const word = greats(down - 2, base)
-    return { label: word, short: word, category: 'nibling' }
+    return { word: greats(down - 2, bySex(sex, 'nephew', 'niece', 'niece or nephew')) }
   }
 
   const degree = Math.min(up, down) - 1
   const removed = Math.abs(up - down)
-  return {
-    label: `${ordinal(degree)} cousin${removedPhrase(removed)}`,
-    short: `${ordinalShort(degree)} cousin${removedShort(removed)}`,
-    category: 'cousin',
-    degree,
-    removed,
-  }
+  return { word: `${ordinal(degree)} cousin${removedPhrase(removed)}`, degree, removed }
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -242,9 +255,9 @@ export function kinship(g: FamilyGraph, viewerId: string, targetId: string): Kin
   if (sharedUnion) {
     const ended = sharedUnion.status === 'divorced' || sharedUnion.status === 'separated'
     const base =
-      sharedUnion.status === 'married' || sharedUnion.status === 'widowed' || ended
-        ? bySex(target.sex, 'husband', 'wife', 'spouse')
-        : 'partner'
+      sharedUnion.status === 'partners' || sharedUnion.status === 'engaged'
+        ? 'partner'
+        : bySex(target.sex, 'husband', 'wife', 'spouse')
     const word = ended ? `former ${base}` : base
     return {
       ...UNRELATED,
@@ -256,58 +269,43 @@ export function kinship(g: FamilyGraph, viewerId: string, targetId: string): Kin
   }
 
   // 2. Blood: find the nearest ancestor you share.
-  const mine = ancestryIndex(g, viewerId)
-  const theirs = ancestryIndex(g, targetId)
-  const meeting = nearestCommon(mine, theirs)
+  const meeting = nearestCommon(ancestryIndex(g, viewerId), ancestryIndex(g, targetId))
 
   if (meeting) {
     const { up, down } = meeting
-    const base = bloodLabel(target, up, down)
+    const family = familyTerm(target.sex, up, down)
+    const exact = exactTerm(target.sex, up, down)
 
-    // A sibling sharing only one parent gets said properly.
-    let label = base.label
-    let short = base.short
-    if (base.category === 'sibling') {
+    let label = family.word
+    if (family.category === 'sibling') {
       const entry = g.siblingsOf(viewerId).find((s) => s.person.id === targetId)
-      if (entry?.half) {
-        label = `half-${label}`
-        short = `half-${short}`
-      }
+      if (entry?.half) label = `half-${label}`
     }
 
     return {
       label,
-      short,
-      category: base.category,
-      degree: base.degree,
-      removed: base.removed,
+      short: label,
+      exact: exact.word === family.word ? null : exact.word,
+      category: family.category,
+      degree: exact.degree,
+      removed: exact.removed,
       commonAncestorId: meeting.key.startsWith('u:') ? null : meeting.key,
       up,
       down,
-      explanation: explain(g, viewerId, targetId, meeting, base.category),
+      explanation: explain(g, viewerId, targetId, meeting),
     }
   }
 
   // 3. Not blood — but very likely family by marriage.
-  const inLaw = inLawLabel(g, viewerId, target)
-  if (inLaw) return inLaw
-
-  return UNRELATED
+  return inLawLabel(g, viewerId, target) ?? UNRELATED
 }
 
-/** Writes the "why" line shown under a relationship, e.g.
- *  "You both descend from Mary Banda — your grandmother, their great-grandmother." */
-function explain(
-  g: FamilyGraph,
-  viewerId: string,
-  targetId: string,
-  meeting: Meeting,
-  category: KinCategory,
-): string | null {
+/** Writes the "why" line under a relationship. */
+function explain(g: FamilyGraph, viewerId: string, targetId: string, meeting: Meeting): string | null {
   const { up, down } = meeting
-  if (category === 'ancestor' || category === 'descendant') return null
+  if (down === 0 || up === 0) return null
 
-  const ancestor = meeting.key.startsWith('u:') ? null : g.person(meeting.key)
+  const targetFirst = (g.person(targetId)?.given_name || 'they').trim()
 
   if (up === 1 && down === 1) {
     const parents = g.parentsOf(viewerId)
@@ -315,79 +313,107 @@ function explain(
     return 'You share the same parents.'
   }
 
-  if (!ancestor) {
-    return `You both descend from the same family, ${up} generation${up === 1 ? '' : 's'} above you.`
+  // The shared ancestor is a couple nobody has named. Describe them through the
+  // two siblings that lead down to each of you — which is how a family explains
+  // it anyway: "your grandmother and his mother were sisters".
+  if (meeting.key.startsWith('u:')) {
+    const unionId = meeting.key.slice(2)
+    const mineSide = childOnPath(g, unionId, viewerId)
+    const theirSide = childOnPath(g, unionId, targetId)
+    if (mineSide && theirSide && mineSide.id !== theirSide.id) {
+      const mineWord = familyTerm(mineSide.sex, up - 1, 0).word
+      const theirWord = familyTerm(theirSide.sex, down - 1, 0).word
+      const mineDesc = up - 1 === 0 ? fullName(mineSide) : `your ${mineWord} ${fullName(mineSide)}`
+      const theirDesc =
+        down - 1 === 0 ? fullName(theirSide) : `${targetFirst}'s ${theirWord} ${fullName(theirSide)}`
+      return `${sentenceCase(mineDesc)} and ${theirDesc} were ${siblingWord(mineSide.sex, theirSide.sex)}.`
+    }
+    return `You come from the same family, ${up} generation${up === 1 ? '' : 's'} above you.`
   }
 
-  const toViewer = describeAncestorTo(ancestor, up)
-  const toTarget = describeAncestorTo(ancestor, down)
-  const targetName = fullName(g.person(targetId)).split(' ')[0]
-  return `You both descend from ${fullName(ancestor)} — your ${toViewer}, ${targetName}'s ${toTarget}.`
+  const ancestor = g.person(meeting.key)
+  if (!ancestor) return null
+
+  const toViewer = familyTerm(ancestor.sex, up, 0).word
+  const toTarget = familyTerm(ancestor.sex, down, 0).word
+  return `You both descend from ${fullName(ancestor)} — your ${toViewer}, ${targetFirst}'s ${toTarget}.`
 }
 
-function describeAncestorTo(ancestor: Person, depth: number): string {
-  if (depth === 0) return 'self'
-  if (depth === 1) return bySex(ancestor.sex, 'father', 'mother', 'parent')
-  return greats(depth - 2, bySex(ancestor.sex, 'grandfather', 'grandmother', 'grandparent'))
+/** Which child of this union leads down to `personId`. */
+function childOnPath(g: FamilyGraph, unionId: string, personId: string): Person | undefined {
+  const line = ancestorDepths(g, personId)
+  return g.childrenOfUnion(unionId).find((c) => line.has(c.id))
+}
+
+const siblingWord = (a: Sex, b: Sex): string => {
+  if (a === 'female' && b === 'female') return 'sisters'
+  if (a === 'male' && b === 'male') return 'brothers'
+  if (a !== 'unknown' && b !== 'unknown') return 'brother and sister'
+  return 'brother or sister to each other'
 }
 
 // ── Family by marriage ───────────────────────────────────────────────────────
 //
-// One hop only, in both directions: the people your blood relatives married,
-// and the blood relatives of the person you married. Beyond that the labels
-// stop being ones anybody actually uses.
+// One hop in each direction: the people your relatives married, and the
+// relatives of the person you married.
+//
+// The same generational rule applies here, and it is the reason the app can say
+// something families take for granted: your aunt's husband is your uncle. He is
+// no blood relation at all, but that is unambiguously what he is called, and
+// the panel still says exactly how he got the title.
 
 function inLawLabel(g: FamilyGraph, viewerId: string, target: Person): Kinship | null {
-  const make = (
-    label: string,
-    category: KinCategory,
-    explanation: string,
-    short?: string,
-  ): Kinship => ({
+  const make = (label: string, explanation: string, extra: Partial<Kinship> = {}): Kinship => ({
     ...UNRELATED,
     label,
-    short: short ?? label,
-    category,
+    short: label,
+    category: 'in-law',
     explanation,
+    ...extra,
   })
 
   // (a) They married one of your blood relatives.
   for (const spouse of g.spousesOf(target.id)) {
     const rel = bloodOnly(g, viewerId, spouse.id)
     if (!rel) continue
+    const offset = rel.up - rel.down
+    const spouseName = fullName(spouse)
 
-    if (rel.category === 'sibling') {
-      return make(
-        bySex(target.sex, 'brother-in-law', 'sister-in-law', 'sibling-in-law'),
-        'in-law',
-        `Married to your ${rel.label}, ${fullName(spouse)}.`,
-      )
-    }
-    if (rel.category === 'ancestor' && rel.up === 1) {
-      // Your parent's other spouse — a stepparent, not a parent.
+    if (rel.down === 0 && rel.up === 1) {
+      // Married to your parent, but not your parent.
       return make(
         bySex(target.sex, 'stepfather', 'stepmother', 'stepparent'),
-        'step',
-        `Married to your ${rel.label}, ${fullName(spouse)}.`,
+        `Married to your ${rel.word}, ${spouseName}.`,
+        { category: 'step', up: rel.up, down: rel.down },
       )
     }
-    if (rel.category === 'descendant' && rel.down === 1) {
+    if (offset >= 1 && rel.down > 0) {
+      // Your aunt's husband is your uncle; your great-aunt's husband is a
+      // grandfather-generation man and gets that word.
+      const term = familyTerm(target.sex, rel.up, rel.down)
+      return make(term.word, `Married to your ${rel.word}, ${spouseName}.`, {
+        up: rel.up,
+        down: rel.down,
+      })
+    }
+    if (rel.up === 1 && rel.down === 1) {
+      return make(
+        bySex(target.sex, 'brother-in-law', 'sister-in-law', 'sibling-in-law'),
+        `Married to your ${rel.word}, ${spouseName}.`,
+        { up: rel.up, down: rel.down },
+      )
+    }
+    if (rel.up === 0 && rel.down === 1) {
       return make(
         bySex(target.sex, 'son-in-law', 'daughter-in-law', 'child-in-law'),
-        'in-law',
-        `Married to your ${rel.label}, ${fullName(spouse)}.`,
+        `Married to your ${rel.word}, ${spouseName}.`,
+        { up: rel.up, down: rel.down },
       )
     }
-    // "Great-aunt's husband" fits on a card; "husband of your great-aunt" does
-    // not. Cousin degrees get dropped from the short form — "1st cousin once
-    // removed's wife" is not a phrase anybody says — and the panel still
-    // carries the exact wording.
-    const possessiveBase = rel.category === 'cousin' ? 'cousin' : rel.short
     return make(
-      `${bySex(target.sex, 'husband', 'wife', 'partner')} of your ${rel.label}`,
-      'in-law',
-      `Married to your ${rel.label}, ${fullName(spouse)}.`,
-      `${possessiveBase}'s ${bySex(target.sex, 'husband', 'wife', 'partner')}`,
+      `${rel.word}'s ${bySex(target.sex, 'husband', 'wife', 'partner')}`,
+      `Married to your ${rel.word}, ${spouseName}.`,
+      { up: rel.up, down: rel.down },
     )
   }
 
@@ -395,48 +421,39 @@ function inLawLabel(g: FamilyGraph, viewerId: string, target: Person): Kinship |
   for (const mySpouse of g.spousesOf(viewerId)) {
     const rel = bloodOnly(g, mySpouse.id, target.id)
     if (!rel) continue
-    const spouseWord = bySex(mySpouse.sex, "husband's", "wife's", "partner's")
+    const theirs = bySex(mySpouse.sex, 'husband', 'wife', 'partner')
 
-    if (rel.category === 'sibling') {
+    if (rel.up === 1 && rel.down === 1) {
       return make(
         bySex(target.sex, 'brother-in-law', 'sister-in-law', 'sibling-in-law'),
-        'in-law',
-        `Your ${spouseWord.replace("'s", '')} ${rel.label}.`,
+        `Your ${theirs}'s ${rel.word}.`,
       )
     }
-    if (rel.category === 'ancestor' && rel.up === 1) {
+    if (rel.down === 0 && rel.up === 1) {
       return make(
         bySex(target.sex, 'father-in-law', 'mother-in-law', 'parent-in-law'),
-        'in-law',
-        `Your ${spouseWord.replace("'s", '')} ${rel.label}.`,
+        `Your ${theirs}'s ${rel.word}.`,
       )
     }
-    return make(
-      `your ${spouseWord} ${rel.label}`,
-      'in-law',
-      `Related through ${fullName(mySpouse)}.`,
-      `${spouseWord} ${rel.short}`,
-    )
+    return make(`your ${theirs}'s ${rel.word}`, `Related through ${fullName(mySpouse)}.`)
   }
 
   return null
 }
 
-/** Blood-only lookup used by the in-law pass, so it can't recurse into itself. */
+/** Blood-only lookup used by the in-law pass, so it cannot recurse into itself. */
 function bloodOnly(g: FamilyGraph, viewerId: string, targetId: string) {
   if (viewerId === targetId) return null
   const target = g.person(targetId)
   if (!target) return null
   const meeting = nearestCommon(ancestryIndex(g, viewerId), ancestryIndex(g, targetId))
   if (!meeting) return null
-  const base = bloodLabel(target, meeting.up, meeting.down)
-  return { ...base, up: meeting.up, down: meeting.down }
+  const term = familyTerm(target.sex, meeting.up, meeting.down)
+  return { word: term.word, category: term.category, up: meeting.up, down: meeting.down }
 }
 
 /** Turns a label into something that reads correctly in a sentence:
- *  "you", "your aunt", "the husband of your aunt". In-law labels already carry
- *  their own possessive, so blindly prefixing "your" produced nonsense like
- *  "your husband of your aunt". */
+ *  "you", "your aunt", "the husband of your aunt". */
 export const possessive = (k: Kinship): string => {
   if (k.category === 'self') return 'you'
   if (k.label.startsWith('your ')) return k.label
@@ -444,25 +461,22 @@ export const possessive = (k: Kinship): string => {
   return `your ${k.label}`
 }
 
-/** Sentence case. Labels are stored lowercase so they read correctly mid-
- *  sentence ("Emmanuel is the husband of your aunt"); anywhere one stands alone
- *  as a chip it needs a capital. Done here rather than with ::first-letter,
- *  which does not apply to the flex containers those chips are. */
-export const sentenceCase = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s)
-
-/** Groups used by the People page to bucket a long list into something readable. */
+/** Groups used by the People page. Bucketing follows the same generational
+ *  logic as the labels, so an aunt's husband files with the aunts and uncles. */
 export function kinBucket(k: Kinship): string {
-  switch (k.category) {
-    case 'self': return 'You'
-    case 'spouse': return 'Your partner'
-    case 'ancestor': return k.up === 1 ? 'Parents' : 'Grandparents and above'
-    case 'descendant': return k.down === 1 ? 'Children' : 'Grandchildren'
-    case 'sibling': return 'Brothers and sisters'
-    case 'pibling': return 'Aunts and uncles'
-    case 'nibling': return 'Nieces and nephews'
-    case 'cousin': return k.degree === 1 ? 'First cousins' : 'Wider cousins'
-    case 'in-law':
-    case 'step': return 'Family by marriage'
-    default: return 'Not yet connected'
-  }
+  if (k.category === 'self') return 'You'
+  if (k.category === 'spouse') return 'Your partner'
+  if (k.category === 'unrelated') return 'Not yet connected'
+  if (k.up == null || k.down == null) return 'Family by marriage'
+
+  const { up, down } = k
+  if (down === 0) return up === 1 ? 'Parents' : 'Grandparents and above'
+  if (up === 0) return down === 1 ? 'Children' : 'Grandchildren'
+
+  const offset = up - down
+  if (offset === 0) return up === 1 ? 'Brothers and sisters' : 'Cousins'
+  if (offset === 1) return 'Aunts and uncles'
+  if (offset >= 2) return 'Grandparents and above'
+  if (offset === -1) return 'Nieces and nephews'
+  return 'Grandchildren'
 }

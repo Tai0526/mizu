@@ -2,7 +2,7 @@ import { Maximize2, Minus, Plus, Crosshair, UserPlus, Link2 } from 'lucide-react
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { fullName, lifespan, type FamilyGraph } from '../lib/graph'
 import { sentenceCase, type Kinship } from '../lib/kinship'
-import { CARD_H, CARD_W, type Layout } from '../lib/layout'
+import { CARD_H, CARD_W, ROW_H, branchWidth, edgePath, type Layout } from '../lib/layout'
 import type { Person } from '../types'
 import { Avatar, cx } from './ui'
 
@@ -243,22 +243,26 @@ export function TreeCanvas({
             className="pointer-events-none absolute inset-0 overflow-visible"
             aria-hidden
           >
-            {layout.edges.map((edge) => (
-              <path
-                key={edge.key}
-                d={edge.d}
-                pathLength={1}
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className={cx(
-                  'branch-grow',
-                  edge.kind === 'marriage'
-                    ? 'stroke-bloom/70 [stroke-width:2.5]'
-                    : 'stroke-bark/45 [stroke-width:2]',
-                )}
-              />
-            ))}
+            {/* Branches first, thickest (oldest) at the back, so where they
+                cross, the young twigs read as growing out of the old boughs. */}
+            {layout.edges.map((edge) => {
+              const totalRows = Math.max(1, Math.round(layout.height / ROW_H) + 1)
+              return (
+                <path
+                  key={edge.key}
+                  d={edgePath(edge)}
+                  pathLength={1}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={branchWidth(edge, totalRows)}
+                  className={cx(
+                    'branch-grow',
+                    edge.kind === 'marriage' ? 'stroke-bloom/60' : 'stroke-bark/70',
+                  )}
+                />
+              )
+            })}
           </svg>
 
           {layout.cards.map((card) => {

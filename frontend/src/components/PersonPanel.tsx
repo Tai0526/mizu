@@ -108,6 +108,11 @@ export function PersonPanel({
                 {kin.explanation && (
                   <p className="mt-1 text-[13px] leading-snug text-leaf/85">{kin.explanation}</p>
                 )}
+                {kin.exact && (
+                  <p className="mt-1.5 text-[11.5px] italic text-leaf/60">
+                    On paper: your {kin.exact}.
+                  </p>
+                )}
               </>
             ) : mePersonId ? (
               <p className="text-sm text-leaf">

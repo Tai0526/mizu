@@ -140,6 +140,20 @@ export function buildExampleFamily(tree: Tree, accountId: string): SeedResult {
   kids(gChristopher, temwani)
 
   const lawrence = person({ given: 'Lawrence', family: 'Tembo', sex: 'male', birth: 1970 })
+
+  // Lawrence's side — the father's wing of the chart. His parents' names are
+  // gone too, but his brother and sister are not.
+  const moses = person({ given: 'Moses', family: 'Tembo', sex: 'male', birth: 1965 })
+  const esther = person({ given: 'Esther', family: 'Tembo', sex: 'female', birth: 1973 })
+  const temboHome = union(null, null, 'partners')
+  kids(temboHome, moses, lawrence, esther)
+
+  const brenda = person({ given: 'Brenda', family: 'Musonda', sex: 'female', birth: 1969 })
+  const gMoses = union(moses, brenda, 'married', 1992)
+  const daliso = person({ given: 'Daliso', family: 'Tembo', sex: 'male', birth: 1995 })
+  const thandiwe = person({ given: 'Thandiwe', family: 'Tembo', sex: 'female', birth: 1999 })
+  kids(gMoses, daliso, thandiwe)
+
   const joyce = person({ given: 'Joyce', family: 'Sakala', sex: 'female', birth: 1979 })
   const faith = person({ given: 'Faith', family: 'Mulenga', sex: 'female', birth: 1978 })
 

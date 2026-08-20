@@ -18,8 +18,7 @@ const BUCKET_ORDER = [
   'Grandparents and above',
   'Aunts and uncles',
   'Nieces and nephews',
-  'First cousins',
-  'Wider cousins',
+  'Cousins',
   'Family by marriage',
   'Not yet connected',
 ]

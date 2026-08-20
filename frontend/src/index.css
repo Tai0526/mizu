@@ -1,0 +1,116 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light: warm parchment and leaf green — paper you'd draw a family tree on. */
+  :root {
+    --c-canvas: 247 243 234;
+    --c-surface: 255 253 248;
+    --c-raised: 255 255 255;
+    --c-ink: 35 32 26;
+    --c-muted: 122 114 102;
+    --c-line: 226 218 203;
+    --c-leaf: 47 107 79;
+    --c-leaf-soft: 226 238 231;
+    --c-bark: 138 106 74;
+    --c-bloom: 187 108 62;
+    --c-danger: 176 58 46;
+
+    /* Fallback avatars are tinted by name. The hue comes from the person, the
+       lightness from the theme, so a wall of faceless cards stays calm in both. */
+    --avatar-sat: 42%;
+    --avatar-bg-l: 88%;
+    --avatar-fg-l: 26%;
+  }
+
+  .dark {
+    --c-canvas: 17 20 18;
+    --c-surface: 28 33 30;
+    --c-raised: 36 42 38;
+    --c-ink: 236 231 220;
+    --c-muted: 150 160 150;
+    --c-line: 47 55 49;
+    --c-leaf: 106 187 143;
+    --c-leaf-soft: 30 48 39;
+    --c-bark: 178 145 110;
+    --c-bloom: 224 149 96;
+    --c-danger: 231 111 98;
+
+    --avatar-sat: 26%;
+    --avatar-bg-l: 24%;
+    --avatar-fg-l: 76%;
+  }
+
+  html, body, #root { height: 100%; }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    /* Faint paper grain so the canvas doesn't read as a flat browser page. */
+    background-image:
+      radial-gradient(rgb(var(--c-line) / 0.5) 0.5px, transparent 0.5px);
+    background-size: 22px 22px;
+  }
+
+  * { -webkit-tap-highlight-color: transparent; }
+
+  ::selection { @apply bg-leaf/25; }
+
+  /* Slim scrollbars that follow the theme instead of the OS. */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-line rounded-full;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-muted/50; background-clip: content-box; }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-all duration-150 disabled:opacity-45 disabled:pointer-events-none
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-leaf/60 focus-visible:ring-offset-2
+           focus-visible:ring-offset-canvas select-none;
+  }
+  .btn-primary { @apply btn bg-leaf text-white hover:brightness-110 active:brightness-95 shadow-card; }
+  .btn-ghost   { @apply btn text-ink hover:bg-ink/[0.06] active:bg-ink/10; }
+  .btn-outline { @apply btn border border-line bg-surface text-ink hover:border-leaf/50 hover:bg-leaf-soft/60; }
+  .btn-danger  { @apply btn bg-danger text-white hover:brightness-110; }
+  .btn-sm      { @apply px-3 py-1.5 text-[13px] rounded-lg; }
+
+  .field {
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink
+           placeholder:text-muted/70 transition
+           focus:border-leaf focus:outline-none focus:ring-4 focus:ring-leaf/20;
+  }
+  .label { @apply block text-[12px] font-semibold uppercase tracking-wider text-muted mb-1.5; }
+
+  .card { @apply rounded-2xl border border-line bg-surface shadow-card; }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface
+           px-2.5 py-1 text-[12px] font-medium text-muted;
+  }
+  .chip-leaf { @apply chip border-leaf/30 bg-leaf-soft text-leaf; }
+}
+
+/* The connector lines draw themselves in when a branch first appears, so adding
+   a relative literally looks like the tree growing a new limb. */
+.branch-grow {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: grow 0.7s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes grow { to { stroke-dashoffset: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

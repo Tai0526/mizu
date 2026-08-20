@@ -252,7 +252,20 @@ export function createCloudStore(): Store {
     },
 
     async saveMatch(match) {
-      fail((await requireSupabase().from('match_links').upsert(match)).error)
+      const db = requireSupabase()
+      // Never upsert here. Postgres evaluates the INSERT policy on an upsert
+      // row before it discovers the conflict, and that policy requires
+      // proposed_by = auth.uid() — true for the proposer, never for the family
+      // ACCEPTING the link. Answering a proposal is an update, and the update
+      // policy rightly lets either side do it; only a brand-new link inserts.
+      const { data, error } = await db
+        .from('match_links')
+        .update(match)
+        .eq('id', match.id)
+        .select('id')
+      fail(error)
+      if (data && data.length > 0) return
+      fail((await db.from('match_links').insert(match)).error)
     },
 
     async uploadPhoto(personId, dataUrl) {

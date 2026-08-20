@@ -291,7 +291,10 @@ create policy photos_read on storage.objects
   for select using (bucket_id = 'photos');
 create policy photos_write on storage.objects
   for insert to authenticated with check (bucket_id = 'photos');
+-- Replacing or removing a photo is for whoever uploaded it, not any signed-in
+-- account — without the owner check, one stranger could wipe another family's
+-- pictures.
 create policy photos_update on storage.objects
-  for update to authenticated using (bucket_id = 'photos');
+  for update to authenticated using (bucket_id = 'photos' and owner = auth.uid());
 create policy photos_delete on storage.objects
-  for delete to authenticated using (bucket_id = 'photos');
+  for delete to authenticated using (bucket_id = 'photos' and owner = auth.uid());

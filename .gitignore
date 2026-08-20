@@ -6,3 +6,8 @@ dist/
 .DS_Store
 Thumbs.db
 .vite/
+
+# Local Netlify folder
+.netlify
+.netlify/
+supabase/.temp/

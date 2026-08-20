@@ -303,7 +303,7 @@ export function TreeCanvas({
       </div>
 
       {/* Controls */}
-      <div className="pointer-events-none absolute bottom-4 right-4 flex flex-col items-end gap-2">
+      <div className="pointer-events-none absolute bottom-4 right-4 flex flex-col items-end gap-2 max-sm:bottom-[4.5rem]">
         <div className="pointer-events-auto flex flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-card">
           <button onClick={zoomButton(1.25)} className="btn-ghost rounded-none px-2.5 py-2 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:py-3" aria-label="Zoom in">
             <Plus size={16} />

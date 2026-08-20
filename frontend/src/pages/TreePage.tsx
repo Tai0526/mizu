@@ -257,13 +257,13 @@ export function TreePage() {
         </div>
 
         {error && (
-          <div className="absolute bottom-4 left-3 right-3 sm:left-4 sm:right-auto sm:max-w-md">
+          <div className="absolute bottom-4 left-3 right-3 max-sm:bottom-[4.5rem] sm:left-4 sm:right-auto sm:max-w-md">
             <Banner tone="error" onDismiss={dismissError}>{error}</Banner>
           </div>
         )}
 
         {!mePersonId && graph.people.length > 0 && (
-          <div className="pointer-events-none absolute inset-x-3 bottom-4 sm:left-1/2 sm:right-auto sm:w-[26rem] sm:-translate-x-1/2">
+          <div className="pointer-events-none absolute inset-x-3 bottom-4 max-sm:bottom-[4.5rem] sm:left-1/2 sm:right-auto sm:w-[26rem] sm:-translate-x-1/2">
             <div className="pointer-events-auto rounded-xl border border-leaf/30 bg-leaf-soft px-4 py-3 text-[13px] text-leaf shadow-card">
               Tap your own name in the tree, then <strong>This is me</strong> — every relationship
               on screen is worked out from where you stand.
@@ -274,7 +274,7 @@ export function TreePage() {
 
       {/* The panel is a column on a desktop and a full sheet on a phone. */}
       {selected && (
-        <div className="absolute inset-0 z-20 bg-surface sm:static sm:z-auto sm:w-[360px] sm:shrink-0">
+        <div className="fixed inset-0 z-40 bg-surface sm:static sm:z-auto sm:w-[360px] sm:shrink-0">
           <PersonPanel
             person={selected}
             graph={graph}

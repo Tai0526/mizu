@@ -103,6 +103,10 @@ interface RowMember {
   personId: string
   /** The union that put this partner in the row (absent for the anchor). */
   unionId?: string
+  /** Index of the partner this member is married to; defaults to the row's
+   *  anchor. Lets one row carry two anchored people — a mother and a father —
+   *  each with their own other marriages. */
+  partnerIndex?: number
 }
 
 /**
@@ -171,8 +175,9 @@ function assemble(
 
   members.forEach((m, i) => {
     if (!m.unionId) return
-    const from = Math.min(anchorIndex, i)
-    const to = Math.max(anchorIndex, i)
+    const mate = m.partnerIndex ?? anchorIndex
+    const from = Math.min(mate, i)
+    const to = Math.max(mate, i)
 
     if (to - from === 1) {
       const x1 = cardX(from) + CARD_W
@@ -183,7 +188,7 @@ function assemble(
       // A third or later marriage would have its bar cross the cards in
       // between, so it swings underneath the row instead.
       const dip = rowY + CARD_H + 22
-      const x1 = cardCenter(anchorIndex)
+      const x1 = cardCenter(mate)
       const x2 = cardCenter(i)
       edges.push({
         key: `m:${m.unionId}`,
@@ -435,10 +440,50 @@ export function layoutFamily(g: FamilyGraph, meId: string): Layout {
 
   const parentIds = parents.map((p) => p.id)
 
-  // ── Centre: the parents' marriage, you and your siblings, and below ────────
-  const centre = layoutTree(g, { kind: 'union', id: parentUnion.id }, {
-    partnerOrder: [left.id, ...(right ? [right.id] : [])],
-  })
+  // ── Centre: both parents with EVERY marriage they had ──────────────────────
+  //
+  // A father who married three times has children on either side of yours, and
+  // they are your half-brothers and half-sisters — leaving them out of the
+  // middle of the chart is not a simplification, it is wrong. The row reads:
+  // mother's other partners, mother, father, father's other partners, with the
+  // children of each marriage hanging beneath the right couple.
+  const partnerOf = (u: Union, of: string) => (u.partner_a === of ? u.partner_b : u.partner_a)
+  const leftOthers = g.unionsOf(left.id).filter((u) => u.id !== parentUnion.id)
+  const rightOthers = right ? g.unionsOf(right.id).filter((u) => u.id !== parentUnion.id) : []
+
+  const centre = (() => {
+    const ctx: Ctx = { g, visited: new Set(), skip: new Set() }
+    const members: RowMember[] = []
+
+    for (const u of leftOthers) {
+      const sp = partnerOf(u, left.id)
+      if (sp) members.push({ personId: sp, unionId: u.id })
+    }
+    const leftIdx = members.length
+    members.push({ personId: left.id })
+    let rightIdx = -1
+    if (right) {
+      rightIdx = members.length
+      members.push({ personId: right.id, unionId: parentUnion.id, partnerIndex: leftIdx })
+      for (const u of rightOthers) {
+        const sp = partnerOf(u, right.id)
+        if (sp) members.push({ personId: sp, unionId: u.id, partnerIndex: rightIdx })
+      }
+    }
+    // The other partners of the mother marry HER, not the row anchor default.
+    for (let i = 0; i < leftIdx; i++) members[i].partnerIndex = leftIdx
+    members.forEach((m) => ctx.visited.add(m.personId))
+
+    const unionOrder: Union[] = [...leftOthers, parentUnion, ...rightOthers]
+    const groups = unionOrder
+      .map((union) => ({
+        union,
+        blocks: g.childrenOfUnion(union.id).map((c) => layoutPerson(ctx, c.id, 1)),
+      }))
+      .filter((grp) => grp.blocks.length > 0)
+
+    return finish(assemble(ctx, members, groups, 0, leftIdx, `centre:${parentUnion.id}`))
+  })()
 
   // ── Wings: each parent's family, minus the parent (they stand in the centre)
   const wing = (parentId: string): { layout: Layout; parentRow: number } | null => {

@@ -21,6 +21,8 @@ export interface AddRelativeArgs {
   existingPersonId?: string
   unionId?: string
   unionStatus?: UnionStatus
+  /** When both parent slots are taken: the existing parent this person shares. */
+  keepParentId?: string
 }
 
 /**
@@ -57,6 +59,7 @@ export function AddRelativeDialog({
   const [detailed, setDetailed] = useState(false)
   const [status, setStatus] = useState<UnionStatus>('married')
   const [unionId, setUnionId] = useState<string | undefined>()
+  const [keepParentId, setKeepParentId] = useState<string | undefined>()
   const [linking, setLinking] = useState(false)
   const [query, setQuery] = useState('')
   const [saving, setSaving] = useState(false)
@@ -67,6 +70,7 @@ export function AddRelativeDialog({
     setDetailed(false)
     setStatus('married')
     setUnionId(undefined)
+    setKeepParentId(undefined)
     setLinking(false)
     setQuery('')
   }
@@ -77,6 +81,8 @@ export function AddRelativeDialog({
   }
 
   const anchorUnions = anchorId ? graph.unionsOf(anchorId) : []
+  const anchorParents = anchorId ? graph.parentsOf(anchorId) : []
+  const needsSharedParent = relation === 'parent' && anchorParents.length === 2
 
   // Surnames usually run down a line, so pre-filling saves most of the typing.
   const chooseRelation = (next: Relation) => {
@@ -99,6 +105,7 @@ export function AddRelativeDialog({
   const submit = async (existingPersonId?: string) => {
     if (!anchorId || !relation) return
     if (!existingPersonId && !draft.given_name.trim() && !draft.family_name.trim()) return
+    if (needsSharedParent && !keepParentId) return
     setSaving(true)
     try {
       await onAdd({
@@ -108,6 +115,7 @@ export function AddRelativeDialog({
         input: existingPersonId ? undefined : { ...draft },
         unionId: relation === 'child' ? unionId : undefined,
         unionStatus: relation === 'spouse' ? status : undefined,
+        keepParentId: needsSharedParent ? keepParentId : undefined,
       })
       close()
     } finally {
@@ -157,7 +165,7 @@ export function AddRelativeDialog({
           {relation === 'child' && anchorUnions.length > 1 && (
             <Field label="Which marriage?" hint="So the child sits with the right brothers and sisters.">
               <select className="field" value={unionId ?? ''} onChange={(e) => setUnionId(e.target.value)}>
-                <option value="">Not sure</option>
+                <option value="">A different partner, or not recorded</option>
                 {anchorUnions.map((u) => {
                   const other = graph.person(u.partner_a === anchorId ? u.partner_b : u.partner_a)
                   return (
@@ -169,6 +177,50 @@ export function AddRelativeDialog({
                 })}
               </select>
             </Field>
+          )}
+
+          {needsSharedParent && (
+            <div className="rounded-xl border border-bloom/30 bg-bloom/10 px-4 py-3.5">
+              <p className="text-[13.5px] font-semibold">
+                {anchor.given_name} already has two parents here.
+              </p>
+              <p className="mt-1 text-[12.5px] leading-snug text-muted">
+                In families where a parent married more than once, brothers and sisters do not
+                all share the same mother or father. Pick the parent {anchor.given_name} shares —
+                the person you are adding becomes their other parent, and nobody else moves.
+              </p>
+              <div className="mt-3 space-y-1.5">
+                {anchorParents.map((p) => (
+                  <label
+                    key={p.id}
+                    className={cx(
+                      'flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 transition',
+                      keepParentId === p.id
+                        ? 'border-leaf bg-leaf-soft'
+                        : 'border-line bg-surface hover:border-leaf/40',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="shared-parent"
+                      className="accent-[rgb(var(--c-leaf))]"
+                      checked={keepParentId === p.id}
+                      onChange={() => {
+                        setKeepParentId(p.id)
+                        // The new person is almost certainly the other sex of
+                        // the parent being kept; prefill, still editable.
+                        if (p.sex === 'male' && draft.sex === 'unknown') setDraft({ ...draft, sex: 'female' })
+                        if (p.sex === 'female' && draft.sex === 'unknown') setDraft({ ...draft, sex: 'male' })
+                      }}
+                    />
+                    <Avatar person={p} size={28} />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+                      {fullName(p)} stays {anchor.given_name}&rsquo;s {p.sex === 'male' ? 'father' : p.sex === 'female' ? 'mother' : 'parent'}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
 
           {relation === 'spouse' && (
@@ -241,7 +293,11 @@ export function AddRelativeDialog({
                 <button onClick={close} className="btn-ghost">Cancel</button>
                 <button
                   onClick={() => void submit()}
-                  disabled={saving || (!draft.given_name.trim() && !draft.family_name.trim())}
+                  disabled={
+                    saving ||
+                    (!draft.given_name.trim() && !draft.family_name.trim()) ||
+                    (needsSharedParent && !keepParentId)
+                  }
                   className={cx('btn-primary', saving && 'opacity-70')}
                 >
                   {saving ? 'Adding…' : `Add ${draft.given_name.trim() || 'them'}`}

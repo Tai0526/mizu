@@ -85,6 +85,14 @@ export interface ConnectArgs {
   /** Which marriage a child belongs to, when the anchor has more than one. */
   unionId?: string
   unionStatus?: UnionStatus
+  /**
+   * Adding a parent to someone whose two parent slots are already taken:
+   * the id of the existing parent this person SHARES. The new person becomes
+   * the other parent, and the anchor moves into that couple's union — which is
+   * how "my father married three times and we don't all have the same mother"
+   * gets recorded, one sibling at a time, without disturbing anyone else.
+   */
+  keepParentId?: string
 }
 
 export interface ConnectResult extends Writes {
@@ -104,6 +112,7 @@ export function connect({
   person,
   unionId,
   unionStatus = 'married',
+  keepParentId,
 }: ConnectArgs): ConnectResult {
   const g = buildGraph(data)
   const writes = emptyWrites()
@@ -122,10 +131,35 @@ export function connect({
     case 'parent': {
       const birthUnion = g.parentUnionOf(anchorId)
       if (birthUnion) {
-        if (!birthUnion.partner_a) {
-          writes.updatedUnions.push({ ...birthUnion, partner_a: person.id })
-        } else if (!birthUnion.partner_b) {
-          writes.updatedUnions.push({ ...birthUnion, partner_b: person.id })
+        const full = birthUnion.partner_a && birthUnion.partner_b
+
+        if (!full) {
+          if (!birthUnion.partner_a) {
+            writes.updatedUnions.push({ ...birthUnion, partner_a: person.id })
+          } else {
+            writes.updatedUnions.push({ ...birthUnion, partner_b: person.id })
+          }
+        } else if (keepParentId) {
+          // Both slots taken, and the caller says which parent is shared. Move
+          // the anchor into the union of (kept parent, new person) — reusing it
+          // if that couple is already recorded, so full siblings regroup.
+          if (keepParentId !== birthUnion.partner_a && keepParentId !== birthUnion.partner_b) {
+            return { ...writes, summary: '', error: 'That person is not currently recorded as a parent here.' }
+          }
+          const existing = g
+            .unionsOf(keepParentId)
+            .find((u) => u.partner_a === person.id || u.partner_b === person.id)
+          let target = existing
+          if (!target) {
+            target = makeUnion(treeId, keepParentId, person.id)
+            writes.unions.push(target)
+          }
+          writes.children.push(makeChildLink(treeId, target.id, anchorId))
+          const kept = g.person(keepParentId)
+          return {
+            ...writes,
+            summary: `${anchorName} now recorded under ${kept?.given_name ?? 'their parent'} and ${personName}. Everyone else stays where they are.`,
+          }
         } else {
           return {
             ...writes,

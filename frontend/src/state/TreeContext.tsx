@@ -36,6 +36,8 @@ interface AddRelativeArgs {
   existingPersonId?: string
   unionId?: string
   unionStatus?: UnionStatus
+  /** When both parent slots are taken: the existing parent this person shares. */
+  keepParentId?: string
 }
 
 interface TreeValue {
@@ -223,7 +225,7 @@ export function TreeProvider({ children }: { children: ReactNode }) {
   )
 
   const addRelative = useCallback(
-    async ({ anchorId, relation, input, existingPersonId, unionId, unionStatus }: AddRelativeArgs) => {
+    async ({ anchorId, relation, input, existingPersonId, unionId, unionStatus, keepParentId }: AddRelativeArgs) => {
       const current = dataRef.current
       if (!current || !account) return null
 
@@ -238,7 +240,7 @@ export function TreeProvider({ children }: { children: ReactNode }) {
         return null
       }
 
-      const result = connect({ data: current, anchorId, relation, person, unionId, unionStatus })
+      const result = connect({ data: current, anchorId, relation, person, unionId, unionStatus, keepParentId })
       if (result.error) {
         setError(result.error)
         return null

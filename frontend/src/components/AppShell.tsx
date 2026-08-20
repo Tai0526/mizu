@@ -27,11 +27,11 @@ export function AppShell({ children, bare }: { children: ReactNode; bare?: boole
         <span className="font-display text-lg font-bold tracking-tight">Mizu</span>
 
         {tree && (
-          <div className="relative ml-1 min-w-0">
+          <div className="relative ml-1 min-w-0 flex-1 sm:flex-initial">
             <button
               onClick={() => setTreeMenuOpen((o) => !o)}
               onBlur={() => setTimeout(() => setTreeMenuOpen(false), 150)}
-              className="flex min-w-0 items-center gap-1 rounded-lg px-2 py-1 text-[13px] font-medium text-muted transition hover:bg-ink/5 hover:text-ink"
+              className="flex w-full max-w-full min-w-0 items-center gap-1 rounded-lg px-2 py-1 text-[13px] font-medium text-muted transition hover:bg-ink/5 hover:text-ink sm:w-auto sm:max-w-[16rem]"
             >
               <span className="truncate">{tree.name}</span>
               <ChevronDown size={13} className="shrink-0" />
@@ -69,23 +69,27 @@ export function AppShell({ children, bare }: { children: ReactNode; bare?: boole
         )}
 
         <nav className="ml-auto flex items-center gap-0.5">
-          {NAV.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                cx(
-                  'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition',
-                  '[@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:px-3',
-                  isActive ? 'bg-leaf-soft text-leaf' : 'text-muted hover:bg-ink/5 hover:text-ink',
-                )
-              }
-            >
-              <Icon size={15} />
-              <span className="hidden sm:inline">{label}</span>
-            </NavLink>
-          ))}
+          {/* On a phone these three live in the bottom bar instead, so a long
+              tree name never squeezes them into mis-taps. */}
+          <div className="hidden items-center gap-0.5 sm:flex">
+            {NAV.map(({ to, label, icon: Icon, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  cx(
+                    'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition',
+                    '[@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:px-3',
+                    isActive ? 'bg-leaf-soft text-leaf' : 'text-muted hover:bg-ink/5 hover:text-ink',
+                  )
+                }
+              >
+                <Icon size={15} />
+                <span>{label}</span>
+              </NavLink>
+            ))}
+          </div>
 
           <button onClick={toggle} className="btn-ghost btn-sm ml-1" aria-label="Switch light or dark">
             {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
@@ -125,7 +129,29 @@ export function AppShell({ children, bare }: { children: ReactNode; bare?: boole
         </nav>
       </header>
 
-      <main className={cx('min-h-0 flex-1', bare ? '' : 'overflow-y-auto')}>{children}</main>
+      <main className={cx('min-h-0 flex-1 pb-14 sm:pb-0', bare ? '' : 'overflow-y-auto')}>
+        {children}
+      </main>
+
+      {/* Phone tab bar: thumb-reach, fixed size, immune to long tree names. */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+        {NAV.map(({ to, label, icon: Icon, end }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            className={({ isActive }) =>
+              cx(
+                'flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 text-[10.5px] font-semibold transition',
+                isActive ? 'text-leaf' : 'text-muted',
+              )
+            }
+          >
+            <Icon size={19} />
+            {label}
+          </NavLink>
+        ))}
+      </nav>
     </div>
   )
 }

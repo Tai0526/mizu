@@ -14,6 +14,7 @@ import { newId, nowIso } from '../lib/id'
 import { applyWrites, connect, makePerson, type Relation } from '../lib/ops'
 import { buildExampleFamily, buildNeighbourFamily } from '../lib/seed'
 import { store } from '../lib/store'
+import { supabase } from '../lib/supabase'
 import type { NewPersonInput } from '../lib/store/types'
 import type { MatchLink, Person, Tree, TreeData, Union, UnionStatus } from '../types'
 import { useAuth } from './AuthContext'
@@ -68,6 +69,9 @@ interface TreeValue {
   setMePerson: (personId: string | null) => Promise<void>
   refresh: () => Promise<void>
   dismissError: () => void
+  /** Bumps whenever a live change arrives from the backend, so screens that
+   *  hold their own copies of shared data know to refetch. */
+  liveVersion: number
 }
 
 const TreeContext = createContext<TreeValue | null>(null)
@@ -85,6 +89,13 @@ export function TreeProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const dataRef = useRef<TreeData | null>(null)
   dataRef.current = data
+  const [liveVersion, setLiveVersion] = useState(0)
+  /** Writes still on their way to the backend. A live refetch that lands in
+   *  that window would read the world WITHOUT the change we just drew, and the
+   *  card the user added would flicker out — so refetches wait for zero. */
+  const writesInFlight = useRef(0)
+  const activeIdRef = useRef<string | null>(null)
+  activeIdRef.current = activeId
 
   // ── Loading ────────────────────────────────────────────────────────────────
 
@@ -132,6 +143,69 @@ export function TreeProvider({ children }: { children: ReactNode }) {
     })
   }, [loadTrees])
 
+  /** Refetch everything without touching the loading flag — live updates
+   *  should slide in, not blank the screen. */
+  const reloadSilently = useCallback(async () => {
+    const id = activeIdRef.current
+    if (!id) return
+    if (writesInFlight.current > 0) {
+      // Try again once our own write settles; its confirmation event will
+      // also land here.
+      setTimeout(() => void reloadSilently(), 600)
+      return
+    }
+    try {
+      const [fresh, everything, matchLinks] = await Promise.all([
+        store.loadTree(id),
+        store.loadAllTrees(),
+        store.listMatches(),
+      ])
+      if (activeIdRef.current !== id) return
+      if (fresh) setData(fresh)
+      setNeighbours(everything)
+      setLinks(matchLinks)
+      setLiveVersion((v) => v + 1)
+    } catch {
+      // A dropped refetch is invisible; the next event or navigation catches up.
+    }
+  }, [])
+
+  // ── Live changes ───────────────────────────────────────────────────────────
+  //
+  // Cloud mode: the database publishes every change a member is allowed to see
+  // — an aunt adding a cousin, a family accepting a match — and each event
+  // nudges a debounced refetch. Local mode: the browser's storage event does
+  // the same across tabs. Either way, nobody reloads anything by hand.
+  useEffect(() => {
+    if (!account) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const nudge = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => void reloadSilently(), 400)
+    }
+
+    if (store.mode === 'cloud' && supabase) {
+      const sb = supabase
+      const channel = sb
+        .channel('mizu-live')
+        .on('postgres_changes', { event: '*', schema: 'public' }, nudge)
+        .subscribe()
+      return () => {
+        clearTimeout(timer)
+        void sb.removeChannel(channel)
+      }
+    }
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key?.startsWith('mizu.v1.')) nudge()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [account, reloadSilently])
+
   const selectTree = useCallback((treeId: string) => {
     localStorage.setItem(ACTIVE_TREE_KEY, treeId)
     setActiveId(treeId)
@@ -156,9 +230,12 @@ export function TreeProvider({ children }: { children: ReactNode }) {
   const mePersonId = useMemo(() => {
     if (!data || !account) return null
     const member = data.members.find((m) => m.user_id === account.id)
-    if (member?.person_id) return member.person_id
-    // Falls back to whichever node claims this account, which is what a
-    // confirmed cross-tree match sets.
+    // A claim is only real if the person still exists — someone deleting a
+    // record must not leave another account pointing at nothing, because an
+    // account with a phantom viewpoint computes no relationship labels at all.
+    if (member?.person_id && data.people.some((p) => p.id === member.person_id)) {
+      return member.person_id
+    }
     return data.people.find((p) => p.claimed_by === account.id)?.id ?? null
   }, [data, account])
 
@@ -169,6 +246,7 @@ export function TreeProvider({ children }: { children: ReactNode }) {
     async (next: TreeData, persist: () => Promise<void>): Promise<boolean> => {
       const previous = dataRef.current
       setData(next)
+      writesInFlight.current += 1
       try {
         await persist()
         return true
@@ -176,6 +254,8 @@ export function TreeProvider({ children }: { children: ReactNode }) {
         setData(previous)
         setError(err instanceof Error ? err.message : 'That change could not be saved.')
         return false
+      } finally {
+        writesInFlight.current -= 1
       }
     },
     [],
@@ -419,11 +499,13 @@ export function TreeProvider({ children }: { children: ReactNode }) {
       setMePerson,
       refresh,
       dismissError: () => setError(null),
+      liveVersion,
     }),
     [
       trees, tree, data, graph, treeNameOf, loading, error, mePersonId,
       selectTree, createTree, loadExampleFamily, addRelative, addFirstPerson,
       updatePerson, removePerson, updateUnion, removeUnion, setMePerson, refresh,
+      liveVersion,
     ],
   )
 

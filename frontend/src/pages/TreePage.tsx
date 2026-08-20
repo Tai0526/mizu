@@ -6,12 +6,15 @@ import { PersonPanel } from '../components/PersonPanel'
 import { TreeCanvas } from '../components/TreeCanvas'
 import { Avatar, Banner, Spinner, cx } from '../components/ui'
 import { fullName, lifespan } from '../lib/graph'
+import { nameSimilarity } from '../lib/matching'
 import { kinship, type Kinship } from '../lib/kinship'
 import { findRoot, layoutFamily, layoutTree, type RootRef } from '../lib/layout'
+import { useAuth } from '../state/AuthContext'
 import { useTree } from '../state/TreeContext'
 import type { Relation } from '../lib/ops'
 
 export function TreePage() {
+  const { account } = useAuth()
   const {
     data, graph, treeNameOf, loading, error, dismissError,
     mePersonId, addRelative, updatePerson, removePerson, setMePerson,
@@ -67,6 +70,13 @@ export function TreePage() {
     setRootRef(findRoot(graph, anchor) ?? { kind: 'person', id: anchor })
   }, [graph, mePersonId, rootRef])
 
+  // The moment an account claims who they are, the chart re-centres on them.
+  // Without this, someone who signed in before claiming stays stuck on the
+  // single-line view the page booted into, with half their family off screen.
+  useEffect(() => {
+    if (mePersonId) setRootRef(null)
+  }, [mePersonId])
+
   // If the current trunk disappears (the person was removed), pick another.
   useEffect(() => {
     if (!graph || !rootRef) return
@@ -102,6 +112,19 @@ export function TreePage() {
     for (const p of graph.people) map.set(p.id, kinship(graph, mePersonId, p.id))
     return map
   }, [graph, mePersonId])
+
+  // Who this account probably is, judged by name. Every relationship label on
+  // screen depends on the answer, so an account that has not claimed a card yet
+  // gets asked directly, with its best matches one tap away.
+  const claimSuggestions = useMemo(() => {
+    if (!graph || !data || mePersonId || !account) return []
+    return data.people
+      .map((p) => ({ p, score: nameSimilarity(fullName(p), account.display_name) }))
+      .filter((x) => x.score >= 0.55)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 2)
+      .map((x) => x.p)
+  }, [graph, data, mePersonId, account])
 
   const results = useMemo(() => {
     const term = query.trim().toLowerCase()
@@ -268,9 +291,33 @@ export function TreePage() {
 
         {!mePersonId && graph.people.length > 0 && (
           <div className="pointer-events-none absolute inset-x-3 bottom-4 max-sm:bottom-[4.5rem] sm:left-1/2 sm:right-auto sm:w-[26rem] sm:-translate-x-1/2">
-            <div className="pointer-events-auto rounded-xl border border-leaf/30 bg-leaf-soft px-4 py-3 text-[13px] text-leaf shadow-card">
-              Tap your own name in the tree, then <strong>This is me</strong> — every relationship
-              on screen is worked out from where you stand.
+            <div className="pointer-events-auto rounded-xl border border-leaf/30 bg-leaf-soft px-4 py-3 shadow-card">
+              <p className="text-[13px] font-semibold text-leaf">Which one is you?</p>
+              <p className="mt-0.5 text-[12px] leading-snug text-leaf/80">
+                Every label on this chart — mum, uncle, cousin — is worked out from where you
+                stand, so it needs to know.
+              </p>
+              {claimSuggestions.length > 0 ? (
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  {claimSuggestions.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => void setMePerson(p.id)}
+                      className="btn-primary btn-sm"
+                    >
+                      I am {fullName(p)}
+                    </button>
+                  ))}
+                  <span className="self-center text-[12px] text-leaf/70">
+                    or tap your card, then <strong>This is me</strong>
+                  </span>
+                </div>
+              ) : (
+                <p className="mt-1.5 text-[12.5px] text-leaf/80">
+                  Tap your own card in the tree, then <strong>This is me</strong>. Not added yet?
+                  Add yourself first — a child of your parents.
+                </p>
+              )}
             </div>
           </div>
         )}

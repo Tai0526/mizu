@@ -22,7 +22,7 @@ import type { MatchLink, Person, TreeData } from '../types'
  */
 export function DiscoverPage() {
   const { account } = useAuth()
-  const { data, trees, mePersonId } = useTree()
+  const { data, trees, mePersonId, liveVersion } = useTree()
   const [allTrees, setAllTrees] = useState<TreeData[]>([])
   const [matches, setMatches] = useState<MatchLink[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,6 +46,13 @@ export function DiscoverPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // A proposal answered on another phone, or a new person recorded anywhere we
+  // can see, lands here without anyone pulling to refresh.
+  useEffect(() => {
+    if (liveVersion > 0) void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveVersion])
 
   const myTreeIds = useMemo(() => new Set(trees.map((t) => t.id)), [trees])
 

@@ -95,7 +95,7 @@ export function PersonPanel({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {/* The headline. */}
           <div className="rounded-xl border border-leaf/25 bg-leaf-soft px-4 py-3">
             {isMe ? (

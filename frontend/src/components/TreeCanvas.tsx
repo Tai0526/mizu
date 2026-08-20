@@ -159,7 +159,13 @@ export function TreeCanvas({
   const onPointerDown = (e: React.PointerEvent) => {
     // Only the background pans; a press on a card is a press on a card.
     if ((e.target as HTMLElement).closest('[data-card]')) return
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    // Capture keeps the drag alive when a fast finger leaves the element, but
+    // a refused capture must not kill panning — track the pointer regardless.
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {
+      /* some pointer streams refuse capture; the move/up handlers still fire */
+    }
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
     if (pointers.current.size === 1) {
@@ -299,19 +305,19 @@ export function TreeCanvas({
       {/* Controls */}
       <div className="pointer-events-none absolute bottom-4 right-4 flex flex-col items-end gap-2">
         <div className="pointer-events-auto flex flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-card">
-          <button onClick={zoomButton(1.25)} className="btn-ghost rounded-none px-2.5 py-2" aria-label="Zoom in">
+          <button onClick={zoomButton(1.25)} className="btn-ghost rounded-none px-2.5 py-2 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:py-3" aria-label="Zoom in">
             <Plus size={16} />
           </button>
-          <button onClick={zoomButton(0.8)} className="btn-ghost rounded-none border-t border-line px-2.5 py-2" aria-label="Zoom out">
+          <button onClick={zoomButton(0.8)} className="btn-ghost rounded-none border-t border-line px-2.5 py-2 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:py-3" aria-label="Zoom out">
             <Minus size={16} />
           </button>
-          <button onClick={fit} className="btn-ghost rounded-none border-t border-line px-2.5 py-2" aria-label="Fit the whole tree">
+          <button onClick={fit} className="btn-ghost rounded-none border-t border-line px-2.5 py-2 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:py-3" aria-label="Fit the whole tree">
             <Maximize2 size={16} />
           </button>
           {mePersonId && (
             <button
               onClick={() => centreOn(mePersonId, 0.9)}
-              className="btn-ghost rounded-none border-t border-line px-2.5 py-2 text-leaf"
+              className="btn-ghost rounded-none border-t border-line px-2.5 py-2 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:py-3 text-leaf"
               aria-label="Find me"
             >
               <Crosshair size={16} />
@@ -409,9 +415,11 @@ function PersonNode({
         aria-label={`Add a relative of ${fullName(person)}`}
         className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-line bg-surface text-leaf opacity-0 shadow-card transition
                    hover:brightness-105 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-leaf
-                   group-hover:opacity-100 sm:opacity-0 [@media(hover:none)]:opacity-100"
+                   group-hover:opacity-100 sm:opacity-0 [@media(hover:none)]:opacity-100
+                   [@media(pointer:coarse)]:-right-3 [@media(pointer:coarse)]:-top-3 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10"
       >
-        <UserPlus size={13} />
+        <UserPlus size={13} className="[@media(pointer:coarse)]:hidden" />
+        <UserPlus size={17} className="hidden [@media(pointer:coarse)]:block" />
       </button>
     </div>
   )

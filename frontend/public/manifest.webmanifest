@@ -1,0 +1,12 @@
+{
+  "name": "Mizu — your family, mapped",
+  "short_name": "Mizu",
+  "description": "Build your family tree together, and find the relatives you never knew you had.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f3ea",
+  "theme_color": "#1f3a2e",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

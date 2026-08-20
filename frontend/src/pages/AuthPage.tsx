@@ -28,8 +28,10 @@ export function AuthPage() {
 
   return (
     <div className="grid min-h-full lg:grid-cols-2">
-      {/* The pitch. */}
-      <section className="relative flex flex-col justify-center overflow-hidden px-6 py-14 sm:px-12 lg:px-16">
+      {/* The pitch. On a phone the form comes first — someone opening a link
+          their cousin sent wants to join, not to scroll through an argument —
+          and the story sits underneath for anyone still deciding. */}
+      <section className="order-2 border-t border-line lg:order-1 lg:border-t-0 relative flex flex-col justify-center overflow-hidden px-6 py-14 sm:px-12 lg:px-16">
         <div className="relative max-w-md">
           <div className="flex items-center gap-2 text-leaf">
             <TreeDeciduous size={26} />
@@ -67,7 +69,7 @@ export function AuthPage() {
       </section>
 
       {/* The form. */}
-      <section className="flex items-center justify-center border-t border-line bg-surface px-6 py-14 lg:border-l lg:border-t-0">
+      <section className="order-1 lg:order-2 flex items-center justify-center bg-surface px-6 py-14 lg:border-l lg:border-line">
         <form onSubmit={submit} className="w-full max-w-sm">
           <h2 className="font-display text-2xl font-semibold">
             {isNew ? 'Start your tree' : 'Welcome back'}

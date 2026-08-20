@@ -46,8 +46,16 @@
 
   html, body, #root { height: 100%; }
 
+  /* Phone browsers shrink and grow their toolbars while you scroll; 100dvh
+     tracks the real visible height so the canvas never hides under them. */
+  @supports (height: 100dvh) {
+    body, #root { height: 100dvh; }
+  }
+
   body {
     @apply bg-canvas text-ink font-sans antialiased;
+    /* Panning the tree at its edge must not turn into pull-to-refresh. */
+    overscroll-behavior: none;
     /* Faint paper grain so the canvas doesn't read as a flat browser page. */
     background-image:
       radial-gradient(rgb(var(--c-line) / 0.5) 0.5px, transparent 0.5px);
@@ -82,8 +90,10 @@
   .btn-danger  { @apply btn bg-danger text-white hover:brightness-110; }
   .btn-sm      { @apply px-3 py-1.5 text-[13px] rounded-lg; }
 
+  /* text-base on phones is deliberate: iOS Safari zooms the whole page when a
+     focused input is under 16px, and nothing makes an app feel less native. */
   .field {
-    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-base sm:text-sm text-ink
            placeholder:text-muted/70 transition
            focus:border-leaf focus:outline-none focus:ring-4 focus:ring-leaf/20;
   }
@@ -96,6 +106,13 @@
            px-2.5 py-1 text-[12px] font-medium text-muted;
   }
   .chip-leaf { @apply chip border-leaf/30 bg-leaf-soft text-leaf; }
+}
+
+/* Fingers, not cursors: every button clears the 44px touch-target floor on
+   coarse-pointer devices, without inflating the desktop UI. */
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  .btn-sm { min-height: 40px; }
 }
 
 /* The connector lines draw themselves in when a branch first appears, so adding

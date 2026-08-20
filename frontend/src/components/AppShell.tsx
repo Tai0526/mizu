@@ -22,7 +22,7 @@ export function AppShell({ children, bare }: { children: ReactNode; bare?: boole
 
   return (
     <div className="flex h-full flex-col">
-      <header className="z-30 flex shrink-0 items-center gap-2 border-b border-line bg-surface/90 px-3 py-2.5 backdrop-blur sm:px-4">
+      <header className="z-30 flex shrink-0 items-center gap-2 border-b border-line bg-surface/90 px-3 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))] backdrop-blur sm:px-4">
         <TreeDeciduous size={22} className="shrink-0 text-leaf" />
         <span className="font-display text-lg font-bold tracking-tight">Mizu</span>
 
@@ -77,6 +77,7 @@ export function AppShell({ children, bare }: { children: ReactNode; bare?: boole
               className={({ isActive }) =>
                 cx(
                   'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition',
+                  '[@media(pointer:coarse)]:min-h-[44px] [@media(pointer:coarse)]:px-3',
                   isActive ? 'bg-leaf-soft text-leaf' : 'text-muted hover:bg-ink/5 hover:text-ink',
                 )
               }
@@ -94,7 +95,7 @@ export function AppShell({ children, bare }: { children: ReactNode; bare?: boole
             <button
               onClick={() => setMenuOpen((o) => !o)}
               onBlur={() => setTimeout(() => setMenuOpen(false), 150)}
-              className="grid h-8 w-8 place-items-center rounded-full bg-leaf text-[12px] font-bold text-white"
+              className="grid h-8 w-8 place-items-center rounded-full bg-leaf text-[12px] font-bold text-white [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10"
               aria-label="Account"
             >
               {(account?.display_name ?? '?').slice(0, 1).toUpperCase()}
